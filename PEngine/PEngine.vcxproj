@@ -86,10 +86,10 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <Text Include=".editorconfig.txt" />
+    <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
+    <None Include=".editorconfig" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
