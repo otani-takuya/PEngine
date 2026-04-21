@@ -1,7 +1,15 @@
+//ファイルやディレクトリに関する操作を行うライブラリ
+#include <filesystem>
+//ファイルに書いたり読んだりするためのライブラリ
+#include <fstream>
+//時間を扱うライブラリ
+#include <chrono>
+
+
 #include <windows.h>
+#include <string>
 
 #pragma warning(push)
-#include <string>
 #include <format>
 
 
@@ -14,6 +22,7 @@
 void Log(const std::string& message) {
     OutputDebugStringA(message.c_str());
 }
+
 
 std::wstring ConvertString(const std::string& str) {
     if (str.empty()) {
@@ -41,6 +50,11 @@ std::string ConvertString(const std::wstring& str) {
     std::string result(sizeNeeded, 0);
     WideCharToMultiByte(CP_UTF8, 0, str.data(), static_cast<int>(str.size()), result.data(), sizeNeeded, NULL, NULL);
     return result;
+}
+
+void Log(std::ostream& os, const std::string& message) {
+    os << message << std::endl;
+    OutputDebugStringA(message.c_str());
 }
 
 //ウィンドウプロシージャの定義
@@ -107,6 +121,26 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int){
     // ウィンドウを表示
     ShowWindow(hwnd, SW_SHOW);
 
+
+    //ログのディレクトリを用意
+    std::filesystem::create_directory("logs");
+
+    //現在時刻を取得
+	std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+    //ログファイルの名前にコンマ何秒入らないので、削って秒にする
+	std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds> nowseconds = std::chrono::time_point_cast<std::chrono::seconds>(now); 
+    //日本時間(PCの設定時間)に変換
+	std::chrono::zoned_time localTime{ std::chrono::current_zone(), nowseconds };
+    //formatを使って年月日_時分秒の文字列に変換
+	std::string dateString = std::format("{:%Y%m%d_%H%M%S}", localTime);
+    //時刻を使ってファイル名を決定
+	std::string logFilePath = std::string("logs/") + dateString + ".log";
+    //ファイルを作って書き込み準備
+	std::ofstream logStream(logFilePath);
+
+
+
+
     // wstringValue が未定義だったため定義を追加
     std::wstring wstringValue = L"Sample";
 
@@ -121,7 +155,7 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int){
 			//ゲームの処理↓
 
             // wstring->stringの変換
-            Log(ConvertString(std::format(L"WSTRING{}\n", wstringValue)));
+            //Log(ConvertString(std::format(L"WSTRING{}\n", wstringValue)));
 		}
 	}
 
