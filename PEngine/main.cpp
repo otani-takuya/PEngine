@@ -157,6 +157,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     // ------------------------------
     SetUnhandledExceptionFilter(ExportDump);
 
+    // テスト用クラッシュ（ダンプ確認用）
+    uint32_t* p = nullptr;
+    *p = 100;
+
+
     // ------------------------------
     // ウィンドウ作成
     // ------------------------------
