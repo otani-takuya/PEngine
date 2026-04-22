@@ -5,7 +5,6 @@
 //時間を扱うライブラリ
 #include <chrono>
 
-
 #include <windows.h>
 #include <string>
 
@@ -16,6 +15,15 @@
 //C4023の警告を無効化
 #pragma warning(disable:4023)
 #include <cstdint>
+
+
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <cassert>
+
+#pragma comment(lib, "d3d12.lib")
+#pragma comment(lib, "dxgi.lib")
+
 
 #pragma warning(pop)
 
@@ -56,6 +64,7 @@ void Log(std::ostream& os, const std::string& message) {
     os << message << std::endl;
     OutputDebugStringA(message.c_str());
 }
+
 
 //ウィンドウプロシージャの定義
 LRESULT CALLBACK WindowProc(
@@ -138,6 +147,52 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int){
     //ファイルを作って書き込み準備
 	std::ofstream logStream(logFilePath);
 
+    Log(logStream, "Application Start\n");
+
+
+    //DXGIファクトリーの生成
+    IDXGIFactory7* dxgiFactory = nullptr;
+    //HRESULTはWindows系のエラーコードであり、関数が成功したかどうかをSUCCEEDEDマクロで判定できる
+    HRESULT hr = CreateDXGIFactory(IID_PPV_ARGS(&dxgiFactory));
+    //初期化の根本的な部分でエラーが出た場合はプログラムが間違っているか、どうにもできない場合が多いので、assertにしておく
+    assert(SUCCEEDED(hr));
+
+	//使用するアダプター用の変数。最初にnullptrを入れておく
+	IDXGIAdapter4* useAdapter = nullptr;
+    //いい順にアダプタを頼む
+    for (UINT i = 0; dxgiFactory->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&useAdapter)) != DXGI_ERROR_NOT_FOUND; ++i) {
+        //アダプタの名前を取得してログに出す
+        DXGI_ADAPTER_DESC3 adapterDesc{};
+        hr = useAdapter->GetDesc3(&adapterDesc);
+		assert(SUCCEEDED(hr)); //取得できないのは一大事
+        //ソフトウェアアダプタでなければ採用！
+        if (!(adapterDesc.Flags & DXGI_ADAPTER_FLAG3_SOFTWARE)) {
+            //採用したアダプタの情報ログに出力。wstringの方なので注意
+            Log(logStream, ConvertString(std::format(L"Use Adapter:{}\n", adapterDesc.Description)));
+            break;
+        }
+		useAdapter = nullptr; // ソフトウェアアダプタだった場合は見ないことにする
+	}
+    //適切なアダプタが見つからなかったので起動できない
+	assert(useAdapter != nullptr);
+
+    ID3D12Device* device = nullptr;
+    //継続レベルとログ出力用の文字列
+    D3D_FEATURE_LEVEL featureLevels[] = {
+        D3D_FEATURE_LEVEL_12_2, D3D_FEATURE_LEVEL_12_1,D3D_FEATURE_LEVEL_12_0
+    };
+
+    const char* featureLevelStrings[] = {
+        "12.2", "12.1", "12.0"
+	};
+	//高い順に生成できるか試す
+    for (size_t i = 0;i < _countof(featureLevels); ++i) {
+        hr = D3D12CreateDevice(useAdapter, featureLevels[i], IID_PPV_ARGS(&device));
+        if (SUCCEEDED(hr)) {
+            Log(logStream, std::format("Feature Level {} is supported.\n", featureLevelStrings[i]));
+            break;
+        }
+	}
 
 
 
@@ -159,5 +214,6 @@ int WINAPI WinMain(_In_ HINSTANCE, _In_opt_ HINSTANCE, _In_ LPSTR, _In_ int){
 		}
 	}
 
+    Log(logStream, "Application End\n");
 	return 0;
 }
