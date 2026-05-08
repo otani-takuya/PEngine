@@ -313,6 +313,7 @@ int WINAPI WinMain(
 	Log(logStream, "Application Start");
 
 
+
 	// ==============================
 	// DXGIファクトリ生成
 	// ==============================
@@ -585,6 +586,7 @@ int WINAPI WinMain(
 	assert(SUCCEEDED(hr));
 
 
+
 	// ==============================
 	// RTV作成
 	// ==============================
@@ -621,12 +623,15 @@ int WINAPI WinMain(
 	);
 
 
+
+
 	// ==============================
 	// 描画処理
 	// ==============================
 
 	UINT backBufferIndex =
 		swapChain->GetCurrentBackBufferIndex();
+
 
 	// --------------------------------
 	// ResourceBarrier
@@ -782,6 +787,8 @@ int WINAPI WinMain(
 		WaitForSingleObject(fenceEvent, INFINITE);
 
 		CloseHandle(fenceEvent);
+
+		assert(fenceEvent != nullptr);
 	}
 
 	// ==============================
