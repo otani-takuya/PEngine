@@ -129,7 +129,6 @@ LRESULT CALLBACK WindowProc(
 
 	case WM_DESTROY:
 
-		// ウィンドウが閉じられたら終了
 		PostQuitMessage(0);
 		return 0;
 	}
@@ -147,10 +146,8 @@ static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
 	SYSTEMTIME time;
 	GetLocalTime(&time);
 
-	// Dumpsフォルダ作成
 	CreateDirectory(L"Dumps", nullptr);
 
-	// ファイル名作成
 	wchar_t filePath[MAX_PATH] = {};
 
 	StringCchPrintfW(
@@ -164,7 +161,6 @@ static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
 		time.wMinute
 	);
 
-	// ダンプファイル作成
 	HANDLE fileHandle = CreateFile(
 		filePath,
 		GENERIC_WRITE,
@@ -180,7 +176,6 @@ static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
 	dumpInfo.ExceptionPointers = exception;
 	dumpInfo.ClientPointers = TRUE;
 
-	// ダンプ出力
 	MiniDumpWriteDump(
 		GetCurrentProcess(),
 		GetCurrentProcessId(),
@@ -277,10 +272,8 @@ int WINAPI WinMain(
 		)
 	)) {
 
-		// DirectXのデバッグ機能を有効化
 		debugController->EnableDebugLayer();
 
-		// GPU側エラーも検知
 		debugController->SetEnableGPUBasedValidation(TRUE);
 	}
 
@@ -311,7 +304,6 @@ int WINAPI WinMain(
 	std::ofstream logStream(logFilePath);
 
 	Log(logStream, "Application Start");
-
 
 
 	// ==============================
@@ -347,7 +339,6 @@ int WINAPI WinMain(
 
 		adapter->GetDesc3(&desc);
 
-		// ソフトウェアGPUは除外
 		if (!(desc.Flags & DXGI_ADAPTER_FLAG3_SOFTWARE)) {
 
 			Log(
@@ -426,25 +417,21 @@ int WINAPI WinMain(
 		)
 	)) {
 
-		// 致命的エラー時停止
 		infoQueue->SetBreakOnSeverity(
 			D3D12_MESSAGE_SEVERITY_CORRUPTION,
 			TRUE
 		);
 
-		// エラー時停止
 		infoQueue->SetBreakOnSeverity(
 			D3D12_MESSAGE_SEVERITY_ERROR,
 			TRUE
 		);
 
-		// 警告時停止
 		infoQueue->SetBreakOnSeverity(
 			D3D12_MESSAGE_SEVERITY_WARNING,
 			TRUE
 		);
 
-		// 抑制メッセージ
 		D3D12_MESSAGE_ID denyIds[] = {
 			D3D12_MESSAGE_ID_RESOURCE_BARRIER_MISMATCHING_COMMAND_LIST_TYPE,
 		};
@@ -517,6 +504,11 @@ int WINAPI WinMain(
 	assert(SUCCEEDED(hr));
 
 
+	// 最初に閉じておく
+	hr = commandList->Close();
+	assert(SUCCEEDED(hr));
+
+
 	// ==============================
 	// スワップチェーン生成
 	// ==============================
@@ -571,20 +563,15 @@ int WINAPI WinMain(
 
 	ID3D12Resource* backBuffers[2] = { nullptr };
 
-	hr = swapChain->GetBuffer(
-		0,
-		IID_PPV_ARGS(&backBuffers[0])
-	);
+	for (UINT i = 0; i < 2; ++i) {
 
-	assert(SUCCEEDED(hr));
+		hr = swapChain->GetBuffer(
+			i,
+			IID_PPV_ARGS(&backBuffers[i])
+		);
 
-	hr = swapChain->GetBuffer(
-		1,
-		IID_PPV_ARGS(&backBuffers[1])
-	);
-
-	assert(SUCCEEDED(hr));
-
+		assert(SUCCEEDED(hr));
+	}
 
 
 	// ==============================
@@ -610,121 +597,35 @@ int WINAPI WinMain(
 	rtvHandles[1].ptr =
 		rtvHandles[0].ptr + rtvDescriptorSize;
 
-	device->CreateRenderTargetView(
-		backBuffers[0],
-		&rtvDesc,
-		rtvHandles[0]
-	);
+	for (UINT i = 0; i < 2; ++i) {
 
-	device->CreateRenderTargetView(
-		backBuffers[1],
-		&rtvDesc,
-		rtvHandles[1]
-	);
-
-
+		device->CreateRenderTargetView(
+			backBuffers[i],
+			&rtvDesc,
+			rtvHandles[i]
+		);
+	}
 
 
 	// ==============================
-	// 描画処理
+	// Fence生成
 	// ==============================
 
-	UINT backBufferIndex =
-		swapChain->GetCurrentBackBufferIndex();
+	ID3D12Fence* fence = nullptr;
+	uint64_t fenceValue = 0;
 
-
-	// --------------------------------
-	// ResourceBarrier
-	// PRESENT → RENDER_TARGET
-	// --------------------------------
-
-	D3D12_RESOURCE_BARRIER barrier{};
-
-	barrier.Type =
-		D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-
-	barrier.Flags =
-		D3D12_RESOURCE_BARRIER_FLAG_NONE;
-
-	barrier.Transition.pResource =
-		backBuffers[backBufferIndex];
-
-	barrier.Transition.StateBefore =
-		D3D12_RESOURCE_STATE_PRESENT;
-
-	barrier.Transition.StateAfter =
-		D3D12_RESOURCE_STATE_RENDER_TARGET;
-
-	barrier.Transition.Subresource =
-		D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-
-	commandList->ResourceBarrier(1, &barrier);
-
-	// --------------------------------
-	// 描画先設定
-	// --------------------------------
-
-	commandList->OMSetRenderTargets(
-		1,
-		&rtvHandles[backBufferIndex],
-		false,
-		nullptr
+	hr = device->CreateFence(
+		fenceValue,
+		D3D12_FENCE_FLAG_NONE,
+		IID_PPV_ARGS(&fence)
 	);
 
-	// --------------------------------
-	// 画面クリア
-	// --------------------------------
-
-	float clearColor[] = {
-		0.1f,
-		0.25f,
-		0.5f,
-		1.0f
-	};
-
-	commandList->ClearRenderTargetView(
-		rtvHandles[backBufferIndex],
-		clearColor,
-		0,
-		nullptr
-	);
-
-	// --------------------------------
-	// ResourceBarrier
-	// RENDER_TARGET → PRESENT
-	// --------------------------------
-
-	barrier.Transition.StateBefore =
-		D3D12_RESOURCE_STATE_RENDER_TARGET;
-
-	barrier.Transition.StateAfter =
-		D3D12_RESOURCE_STATE_PRESENT;
-
-	commandList->ResourceBarrier(1, &barrier);
-
-
-	// ==============================
-	// コマンド実行
-	// ==============================
-
-	hr = commandList->Close();
 	assert(SUCCEEDED(hr));
 
-	ID3D12CommandList* commandLists[] = {
-		commandList
-	};
+	HANDLE fenceEvent =
+		CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
-	commandQueue->ExecuteCommandLists(
-		1,
-		commandLists
-	);
-
-
-	// ==============================
-	// 画面表示
-	// ==============================
-
-	swapChain->Present(1, 0);
+	assert(fenceEvent != nullptr);
 
 
 	// ==============================
@@ -748,54 +649,197 @@ int WINAPI WinMain(
 		}
 		else {
 
-			// ゲーム処理
+			// ==========================================
+			// GPU待機
+			// ==========================================
+
+			if (fence->GetCompletedValue() < fenceValue) {
+
+				hr = fence->SetEventOnCompletion(
+					fenceValue,
+					fenceEvent
+				);
+
+				assert(SUCCEEDED(hr));
+
+				WaitForSingleObject(
+					fenceEvent,
+					INFINITE
+				);
+			}
+
+			// ==========================================
+			// Reset
+			// ==========================================
+
+			hr = commandAllocator->Reset();
+			assert(SUCCEEDED(hr));
+
+			hr = commandList->Reset(
+				commandAllocator,
+				nullptr
+			);
+
+			assert(SUCCEEDED(hr));
+
+			// ==========================================
+			// バックバッファ取得
+			// ==========================================
+
+			UINT backBufferIndex =
+				swapChain->GetCurrentBackBufferIndex();
+
+			// ==========================================
+			// PRESENT → RENDER_TARGET
+			// ==========================================
+
+			D3D12_RESOURCE_BARRIER barrier{};
+
+			barrier.Type =
+				D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+
+			barrier.Flags =
+				D3D12_RESOURCE_BARRIER_FLAG_NONE;
+
+			barrier.Transition.pResource =
+				backBuffers[backBufferIndex];
+
+			barrier.Transition.StateBefore =
+				D3D12_RESOURCE_STATE_PRESENT;
+
+			barrier.Transition.StateAfter =
+				D3D12_RESOURCE_STATE_RENDER_TARGET;
+
+			barrier.Transition.Subresource =
+				D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+			commandList->ResourceBarrier(1, &barrier);
+
+			// ==========================================
+			// 描画先設定
+			// ==========================================
+
+			commandList->OMSetRenderTargets(
+				1,
+				&rtvHandles[backBufferIndex],
+				false,
+				nullptr
+			);
+
+			// ==========================================
+			// 画面クリア
+			// ==========================================
+
+			float clearColor[] = {
+				0.1f,
+				0.25f,
+				0.5f,
+				1.0f
+			};
+
+			commandList->ClearRenderTargetView(
+				rtvHandles[backBufferIndex],
+				clearColor,
+				0,
+				nullptr
+			);
+
+			// ==========================================
+			// RENDER_TARGET → PRESENT
+			// ==========================================
+
+			barrier.Transition.StateBefore =
+				D3D12_RESOURCE_STATE_RENDER_TARGET;
+
+			barrier.Transition.StateAfter =
+				D3D12_RESOURCE_STATE_PRESENT;
+
+			commandList->ResourceBarrier(1, &barrier);
+
+			// ==========================================
+			// コマンドリスト終了
+			// ==========================================
+
+			hr = commandList->Close();
+			assert(SUCCEEDED(hr));
+
+			// ==========================================
+			// コマンド実行
+			// ==========================================
+
+			ID3D12CommandList* commandLists[] = {
+				commandList
+			};
+
+			commandQueue->ExecuteCommandLists(
+				1,
+				commandLists
+			);
+
+			// ==========================================
+			// 画面表示
+			// ==========================================
+
+			hr = swapChain->Present(1, 0);
+			assert(SUCCEEDED(hr));
+
+			// ==========================================
+			// Fenceシグナル送信
+			// ==========================================
+
+			fenceValue++;
+
+			hr = commandQueue->Signal(
+				fence,
+				fenceValue
+			);
+
+			assert(SUCCEEDED(hr));
 		}
 	}
 
-	// ==============================
-	// GPU待機用Fence作成
-	// ==============================
-
-	ID3D12Fence* fence = nullptr;
-	UINT64 fenceValue = 1;
-
-	hr = device->CreateFence(
-		0,
-		D3D12_FENCE_FLAG_NONE,
-		IID_PPV_ARGS(&fence)
-	);
-
-	assert(SUCCEEDED(hr));
-
-	// ==============================
-	// GPUにシグナル送信
-	// ==============================
-
-	hr = commandQueue->Signal(fence, fenceValue);
-	assert(SUCCEEDED(hr));
 
 	// ==============================
 	// GPU終了待機
 	// ==============================
 
+	fenceValue++;
+
+	hr = commandQueue->Signal(
+		fence,
+		fenceValue
+	);
+
+	assert(SUCCEEDED(hr));
+
 	if (fence->GetCompletedValue() < fenceValue) {
 
-		HANDLE fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+		hr = fence->SetEventOnCompletion(
+			fenceValue,
+			fenceEvent
+		);
 
-		fence->SetEventOnCompletion(fenceValue, fenceEvent);
+		assert(SUCCEEDED(hr));
 
-		WaitForSingleObject(fenceEvent, INFINITE);
-
-		CloseHandle(fenceEvent);
-
-		assert(fenceEvent != nullptr);
+		WaitForSingleObject(
+			fenceEvent,
+			INFINITE
+		);
 	}
+
 
 	// ==============================
 	// 終了処理
 	// ==============================
 
+	CloseHandle(fenceEvent);
+
 	Log(logStream, "Application End");
+
+	if (fence) {
+		fence->Release();
+		fence = nullptr;
+	}
 
 	for (int i = 0; i < 2; ++i) {
 
