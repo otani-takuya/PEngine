@@ -893,7 +893,10 @@ int WINAPI WinMain(
 
 #ifdef _DEBUG
 
-	debugController->Release();
+	if (debugController) {
+		debugController->Release();
+		debugController = nullptr;
+	}
 
 	//リソースリークチェック
 	IDXGIDebug1* debug;
@@ -907,7 +910,7 @@ int WINAPI WinMain(
 
 #endif
 
-	CloseWindow(hwnd);
+	DestroyWindow(hwnd);
 
 	return 0;
 }
