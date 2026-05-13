@@ -19,6 +19,7 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <cassert>
+#include <dxgidebug.h>
 
 // ダンプ出力
 #include <dbghelp.h>
@@ -27,6 +28,7 @@
 #pragma comment(lib, "dbghelp.lib")
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "dxguid.lib")
 
 #pragma warning(pop)
 
@@ -427,10 +429,10 @@ int WINAPI WinMain(
 			TRUE
 		);
 
-		infoQueue->SetBreakOnSeverity(
-			D3D12_MESSAGE_SEVERITY_WARNING,
-			TRUE
-		);
+		//infoQueue->SetBreakOnSeverity(
+		//	D3D12_MESSAGE_SEVERITY_WARNING,
+		//	TRUE
+		//);
 
 		D3D12_MESSAGE_ID denyIds[] = {
 			D3D12_MESSAGE_ID_RESOURCE_BARRIER_MISMATCHING_COMMAND_LIST_TYPE,
@@ -841,17 +843,17 @@ int WINAPI WinMain(
 		fence = nullptr;
 	}
 
+	if (rtvHeap) {
+		rtvHeap->Release();
+		rtvHeap = nullptr;
+	}
+
 	for (int i = 0; i < 2; ++i) {
 
 		if (backBuffers[i]) {
 			backBuffers[i]->Release();
 			backBuffers[i] = nullptr;
 		}
-	}
-
-	if (rtvHeap) {
-		rtvHeap->Release();
-		rtvHeap = nullptr;
 	}
 
 	if (swapChain) {
@@ -891,12 +893,21 @@ int WINAPI WinMain(
 
 #ifdef _DEBUG
 
-	if (debugController) {
-		debugController->Release();
-		debugController = nullptr;
+	debugController->Release();
+
+	//リソースリークチェック
+	IDXGIDebug1* debug;
+
+	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug)))) {
+		debug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
+		debug->ReportLiveObjects(DXGI_DEBUG_APP, DXGI_DEBUG_RLO_ALL);
+		debug->ReportLiveObjects(DXGI_DEBUG_D3D12, DXGI_DEBUG_RLO_ALL);
+		debug->Release();
 	}
 
 #endif
+
+	CloseWindow(hwnd);
 
 	return 0;
 }
