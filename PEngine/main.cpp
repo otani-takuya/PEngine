@@ -286,6 +286,32 @@ static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
 	}
 
 
+	//Resource作成の関数化
+	ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes)
+	{
+		//頂点リソース用のヒープの設定
+		D3D12_HEAP_PROPERTIES uploadHeapProperties{};
+		uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;// UploadHeap
+		//頂点リソースの設定
+		D3D12_RESOURCE_DESC vertexResourceDesc{};
+		//バッファリソース。テクスチャの場合はまた別の設定をする
+		vertexResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		vertexResourceDesc.Width = sizeInBytes;//リソースのサイズ。今回はVector4を3頂点分 //バッファの場合はこれらは1にする決まり
+		vertexResourceDesc.Height = 1;
+		vertexResourceDesc.DepthOrArraySize = 1;
+		vertexResourceDesc.MipLevels = 1;
+		vertexResourceDesc.SampleDesc.Count = 1; //バッファの場合はこれにする決まり
+		vertexResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+		//実際に頂点リソースを作る
+		ID3D12Resource* resource = nullptr;
+		HRESULT hr = device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE,
+			&vertexResourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+			IID_PPV_ARGS(&resource));
+		assert(SUCCEEDED(hr));
+		return resource;
+	}
+
+
 
 // ==============================
 // 定数
@@ -533,6 +559,15 @@ int WINAPI WinMain(
 	D3D12_ROOT_SIGNATURE_DESC descriptionRootSignature{};
 	descriptionRootSignature.Flags =
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+	//RootParameterを作成。複数設定できるので配列にする。今回は結果一つだけなので長さ１の配列
+	D3D12_ROOT_PARAMETER rootParameters[1] = {};
+	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;		// CVBを使う。b0のbと一致する
+	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;		// PixelShaderで使う
+	rootParameters[0].Descriptor.ShaderRegister = 0;						// レジスタ番号0。b0のbと一致する。もしb11と紐づけたいなら11となる
+	descriptionRootSignature.pParameters = rootParameters;					// ルートパラメータの配列
+	descriptionRootSignature.NumParameters = _countof(rootParameters);		// ルートパラメータの数
+
 	// シリアライズしてバイナリにする
 	ID3DBlob* signatureBlob = nullptr; ID3DBlob* errorBlob = nullptr;
 	hr = D3D12SerializeRootSignature(&descriptionRootSignature,
@@ -610,26 +645,17 @@ int WINAPI WinMain(
 
 
 	//VertexResourceの生成
-	// 頂点リソース用のヒープの設定
-	D3D12_HEAP_PROPERTIES uploadHeapProperties{};
-	uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;// UploadHeap
-	// 頂点リソースの設定
-	D3D12_RESOURCE_DESC vertexResourceDesc{};
-	// バッファリソース。 テクスチャの場合はまた別の設定をする
-	vertexResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-	vertexResourceDesc.Width = sizeof(Vector4) * 3;// リソースのサイズ。今回はVector4を3頂点分 // バッファの場合はこれらは1にする決まり
-	vertexResourceDesc.Height = 1;
-	vertexResourceDesc.DepthOrArraySize = 1;
-	vertexResourceDesc.MipLevels = 1;
-	vertexResourceDesc.SampleDesc.Count = 1; // バッファの場合はこれにする決まり
-	vertexResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-	// 実際に頂点リソースを作る
-	ID3D12Resource* vertexResource = nullptr;
-	hr = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-	hr = device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE,
-		&vertexResourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-		IID_PPV_ARGS(&vertexResource));
-	assert(SUCCEEDED(hr));
+	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(Vector4) * 3);
+
+	// ==========================================
+	// MaterialResourceの生成
+	// ==========================================
+	ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Vector4));
+	// Materialデータを書き込む
+	Vector4* materialData = nullptr;
+	materialResource->Map(0,nullptr,reinterpret_cast<void**>(&materialData));
+	// 色設定
+	*materialData = { 1.0f, 0.0f, 0.0f, 1.0f }; // 赤
 
 	//VertexBufferViewの作成
 	//頂点バッファビューを作成する 
@@ -1026,6 +1052,8 @@ int WINAPI WinMain(
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);			// 頂点バッファビューの設定
 			//形状を設定。PSOに設定しているものとはまた別。同じものを設定すると考えておけばいい
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // トポロジの設定
+			//マテリアルCBufferの場所を設定
+			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress()); // Materialリソースの設定。RootParameterのShaderRegisterと合わせること
 			//描画！　(DrawCall/ドローコール)。　3頂点で一つのインスタンス。インスタンスについては今後
 			commandList->DrawInstanced(3, 1, 0, 0);
 
@@ -1207,6 +1235,11 @@ int WINAPI WinMain(
 	if(vertexShaderBlob){
 		vertexShaderBlob->Release();
 		vertexShaderBlob = nullptr;
+	}
+
+	if(materialResource){
+		materialResource->Release();
+		materialResource = nullptr;
 	}
 
 #ifdef _DEBUG
