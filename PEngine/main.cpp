@@ -18,7 +18,7 @@
 #include <dxcapi.h>
 #pragma comment(lib, "dxcompiler.lib")
 
-#include "Vector.h"
+#include "Matrix.h"
 
 // DirectX12
 #include <d3d12.h>
@@ -36,6 +36,14 @@
 #pragma comment(lib, "dxguid.lib")
 
 #pragma warning(pop)
+
+//Transform構造体
+struct Transform
+{
+	Vector3 scale;
+	Vector3 rotate;
+	Vector3 translate;
+};
 
 
 // ==============================
@@ -312,7 +320,6 @@ static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
 	}
 
 
-
 // ==============================
 // 定数
 // ==============================
@@ -554,17 +561,20 @@ int WINAPI WinMain(
 	// ==========================================
 	// PSO作成に必要なもの
 	// ==========================================
-	
+		
 	// RootSignature作成
 	D3D12_ROOT_SIGNATURE_DESC descriptionRootSignature{};
 	descriptionRootSignature.Flags =
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
 	//RootParameterを作成。複数設定できるので配列にする。今回は結果一つだけなので長さ１の配列
-	D3D12_ROOT_PARAMETER rootParameters[1] = {};
+	D3D12_ROOT_PARAMETER rootParameters[2] = {};
 	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;		// CVBを使う。b0のbと一致する
 	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;		// PixelShaderで使う
 	rootParameters[0].Descriptor.ShaderRegister = 0;						// レジスタ番号0。b0のbと一致する。もしb11と紐づけたいなら11となる
+	rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;		// CVBを使う。b1のbと一致する
+	rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;	// VertexShaderで使う
+	rootParameters[1].Descriptor.ShaderRegister = 0;						// レジスタ番号0。b1のbと一致する。もしb11と紐づけたいなら11となる
 	descriptionRootSignature.pParameters = rootParameters;					// ルートパラメータの配列
 	descriptionRootSignature.NumParameters = _countof(rootParameters);		// ルートパラメータの数
 
@@ -647,12 +657,17 @@ int WINAPI WinMain(
 	//VertexResourceの生成
 	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(Vector4) * 3);
 
+	//WVP用のリソースを作る。
+	ID3D12Resource* wvpResource = CreateBufferResource(device, sizeof(Matrix4x4));
+
 	// ==========================================
 	// MaterialResourceの生成
 	// ==========================================
 	ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Vector4));
 	// Materialデータを書き込む
 	Vector4* materialData = nullptr;
+	Matrix4x4* wvpData = nullptr;
+
 	materialResource->Map(0,nullptr,reinterpret_cast<void**>(&materialData));
 	// 色設定
 	*materialData = { 1.0f, 0.0f, 0.0f, 1.0f }; // 赤
@@ -671,6 +686,11 @@ int WINAPI WinMain(
 	Vector4* vertexData = nullptr;
 	//書き込むためのアドレスを取得
 	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
+	wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
+	
+	//単位行列を書き込んでおく
+	*wvpData = MakeIdentity4x4();
+
 	//三角形の頂点データ
 	//左下
 	vertexData[0] = { -0.5f, -0.5f, 0.0f, 1.0f };
@@ -922,8 +942,10 @@ int WINAPI WinMain(
 	assert(fenceEvent != nullptr);
 
 
+	//Transform構造体の定義
+	Transform transform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
 
-
+	Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -5.0f} };
 
 
 	// ==============================
@@ -979,6 +1001,7 @@ int WINAPI WinMain(
 			);
 
 			assert(SUCCEEDED(hr));
+
 
 			// ==========================================
 			// バックバッファ取得
@@ -1042,6 +1065,19 @@ int WINAPI WinMain(
 				nullptr
 			);
 
+			// WVP行列の更新
+			transform.rotate.y += 0.03f; // 毎フレームY軸に回転を加える
+			Matrix4x4 worldMatrix = MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
+			*wvpData = worldMatrix;
+
+			// 3次元的にする
+			Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate,cameraTransform.translate);
+			Matrix4x4 viewMatrix = Inverse(cameraMatrix);
+			Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, static_cast<float>(kClientWidth) / kClientHeight, 0.1f, 100.0f);
+			//WVPMatrixを作る
+			Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
+			*wvpData = worldViewProjectionMatrix;
+
 
 			//三角形の描画
 			commandList->RSSetViewports(1, &viewport);			// ビューポートの設定
@@ -1054,6 +1090,8 @@ int WINAPI WinMain(
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // トポロジの設定
 			//マテリアルCBufferの場所を設定
 			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress()); // Materialリソースの設定。RootParameterのShaderRegisterと合わせること
+			//WVP行列CBufferの場所を設定
+			commandList->SetGraphicsRootConstantBufferView(1,wvpResource->GetGPUVirtualAddress()); // WVPリソースの設定。RootParameterのShaderRegisterと合わせること
 			//描画！　(DrawCall/ドローコール)。　3頂点で一つのインスタンス。インスタンスについては今後
 			commandList->DrawInstanced(3, 1, 0, 0);
 
@@ -1242,6 +1280,11 @@ int WINAPI WinMain(
 		materialResource = nullptr;
 	}
 
+	if (wvpResource) {
+		wvpResource->Release();
+		wvpResource = nullptr;
+	}
+
 #ifdef _DEBUG
 
 	if (debugController) {
@@ -1250,13 +1293,18 @@ int WINAPI WinMain(
 	}
 
 	//リソースリークチェック
-	IDXGIDebug1* debug;
+	IDXGIDebug1* debug = nullptr;
 
-	if (SUCCEEDED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug)))) {
+	hr = DXGIGetDebugInterface1(0, IID_PPV_ARGS(&debug));
+
+	if (SUCCEEDED(hr) && debug != nullptr) {
+
 		debug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
 		debug->ReportLiveObjects(DXGI_DEBUG_APP, DXGI_DEBUG_RLO_ALL);
 		debug->ReportLiveObjects(DXGI_DEBUG_D3D12, DXGI_DEBUG_RLO_ALL);
+
 		debug->Release();
+		debug = nullptr;
 	}
 
 #endif
