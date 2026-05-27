@@ -365,3 +365,8 @@ DirectXGame/imgui.ini
 
 *.dmp
 Dumps/
+
+imgui.ini
+
+[esternals/**]
+generated_code = true

@@ -37,6 +37,14 @@
 
 #pragma warning(pop)
 
+
+#ifdef USE_IMGUI
+#include "externals/imgui/imgui.h"
+#include "externals/imgui/imgui_impl_dx12.h"
+#include "externals/imgui/imgui_impl_win32.h"
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+#endif
+
 //Transform構造体
 struct Transform
 {
@@ -140,6 +148,13 @@ LRESULT CALLBACK WindowProc(
 	LPARAM lparam
 ) {
 
+	#ifdef USE_IMGUI
+	// ImGuiへイベントを渡す
+	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) {
+		return true;
+	}
+	#endif
+
 	switch (msg) {
 
 	case WM_DESTROY:
@@ -207,117 +222,147 @@ static LONG WINAPI ExportDump(EXCEPTION_POINTERS* exception) {
 
 }
 
-	IDxcBlob* CompileShader(
-		//CompilerするShaderファイルへのパス
-		const std::wstring & filePath,
-		//Compilerに使用するProfile
-		const wchar_t* profile,
-		//初期化で生成したもの3つ
-		IDxcUtils * dxcUtils,
-		IDxcCompiler3 * dxcCompiler,
-		IDxcIncludeHandler * includeHandler)
+IDxcBlob* CompileShader(
+	//CompilerするShaderファイルへのパス
+	const std::wstring& filePath,
+	//Compilerに使用するProfile
+	const wchar_t* profile,
+	//初期化で生成したもの3つ
+	IDxcUtils* dxcUtils,
+	IDxcCompiler3* dxcCompiler,
+	IDxcIncludeHandler* includeHandler)
+{
+	//この中身をこの後書いていく
+	//1,hlslファイルを読む
+	//シェーダーをコンパイルする旨をログに出す
+	Log(ConvertString(std::format(L"Begin CompileShader, path!{}, profile;{}\n", filePath, profile)));
+	//hlslファイルを読む
+	IDxcBlobEncoding* shaderSource = nullptr;
+	HRESULT hr = dxcUtils->LoadFile(
+		filePath.c_str(),
+		nullptr,
+		&shaderSource
+	);
+	//エラーなら止める
+	assert(SUCCEEDED(hr));
+	//読み込んだファイルの内容を設定する
+	DxcBuffer shaderSourceBuffer{};
+	shaderSourceBuffer.Ptr = shaderSource->GetBufferPointer();
+	shaderSourceBuffer.Size = shaderSource->GetBufferSize();
+	shaderSourceBuffer.Encoding = DXC_CP_UTF8;
+
+	//2,Compileする
+	LPCWSTR arguments[] = {
+		filePath.c_str(), //コンパイルするファイル
+		L"-E", L"main", //エントリーポイント
+		L"-T", profile, //コンパイルするProfile
+		L"-Zi",L"-Qembed_debug", //デバッグ情報を埋め込む
+		L"-Od", //最適化なし
+		L"-Zpr", //行優先のメモリレイアウト
+	};
+	//Compileする
+	IDxcResult* ShaderResult = nullptr;
+
+	hr = dxcCompiler->Compile(
+		&shaderSourceBuffer,		//コンパイルするソースコード
+		arguments,					//コンパイルオプション
+		_countof(arguments),		//コンパイルオプションの数
+		includeHandler,				//includeに対応するための設定
+		IID_PPV_ARGS(&ShaderResult) //コンパイル結果
+	);
+
+	//コンパイルエラーではなくdxcが起動できないなど致命的な状況
+	assert(SUCCEEDED(hr));
+
+	//3,警告やエラーの確認
+	IDxcBlobUtf8* shaderError = nullptr;
+	ShaderResult->GetOutput(
+		DXC_OUT_ERRORS,
+		IID_PPV_ARGS(&shaderError),
+		nullptr
+	);
+
+	if (shaderError != nullptr && shaderError->GetStringLength() != 0)
 	{
-		//この中身をこの後書いていく
-		//1,hlslファイルを読む
-		//シェーダーをコンパイルする旨をログに出す
-		Log(ConvertString(std::format(L"Begin CompileShader, path!{}, profile;{}\n", filePath, profile)));
-		//hlslファイルを読む
-		IDxcBlobEncoding* shaderSource = nullptr;
-		HRESULT hr = dxcUtils->LoadFile(
-			filePath.c_str(),
-			nullptr,
-			&shaderSource
-		);
-		//エラーなら止める
-		assert(SUCCEEDED(hr));
-		//読み込んだファイルの内容を設定する
-		DxcBuffer shaderSourceBuffer{};
-		shaderSourceBuffer.Ptr = shaderSource->GetBufferPointer();
-		shaderSourceBuffer.Size = shaderSource->GetBufferSize();
-		shaderSourceBuffer.Encoding = DXC_CP_UTF8;
-
-		//2,Compileする
-		LPCWSTR arguments[] = {
-			filePath.c_str(), //コンパイルするファイル
-			L"-E", L"main", //エントリーポイント
-			L"-T", profile, //コンパイルするProfile
-			L"-Zi",L"-Qembed_debug", //デバッグ情報を埋め込む
-			L"-Od", //最適化なし
-			L"-Zpr", //行優先のメモリレイアウト
-		};
-		//Compileする
-		IDxcResult* ShaderResult = nullptr;
-
-		hr = dxcCompiler->Compile(
-			&shaderSourceBuffer,		//コンパイルするソースコード
-			arguments,					//コンパイルオプション
-			_countof(arguments),		//コンパイルオプションの数
-			includeHandler,				//includeに対応するための設定
-			IID_PPV_ARGS(&ShaderResult) //コンパイル結果
-		);
-
-		//コンパイルエラーではなくdxcが起動できないなど致命的な状況
-		assert(SUCCEEDED(hr));
-
-		//3,警告やエラーの確認
-		IDxcBlobUtf8* shaderError = nullptr;
-		ShaderResult->GetOutput(
-			DXC_OUT_ERRORS,
-			IID_PPV_ARGS(&shaderError),
-			nullptr
-		);
-
-		if (shaderError != nullptr && shaderError->GetStringLength() != 0)
-		{
-			Log(shaderError->GetStringPointer());
-			//コンパイルエラーがある場合は止める
-			assert(false);
-		}
-		
-		//4,Compile結果を受け取って返す
-		IDxcBlob* shaderBlob = nullptr;
-		hr = ShaderResult->GetOutput(
-			DXC_OUT_OBJECT,
-			IID_PPV_ARGS(&shaderBlob),
-			nullptr
-		);
-		assert(SUCCEEDED(hr));
-		//成功したログを出す
-		Log(ConvertString(std::format(L"Compile Succeeded!, path!{}, profile;{}\n", filePath, profile)));
-		//もう使わないリソースを解放
-		shaderSource->Release();
-		ShaderResult->Release();
-		//実行用バイナリを返す
-		return shaderBlob;
-
-
+		Log(shaderError->GetStringPointer());
+		//コンパイルエラーがある場合は止める
+		assert(false);
 	}
 
+	//4,Compile結果を受け取って返す
+	IDxcBlob* shaderBlob = nullptr;
+	hr = ShaderResult->GetOutput(
+		DXC_OUT_OBJECT,
+		IID_PPV_ARGS(&shaderBlob),
+		nullptr
+	);
+	assert(SUCCEEDED(hr));
+	//成功したログを出す
+	Log(ConvertString(std::format(L"Compile Succeeded!, path!{}, profile;{}\n", filePath, profile)));
+	//もう使わないリソースを解放
+	shaderSource->Release();
+	ShaderResult->Release();
+	//実行用バイナリを返す
+	return shaderBlob;
 
-	//Resource作成の関数化
-	ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes)
-	{
-		//頂点リソース用のヒープの設定
-		D3D12_HEAP_PROPERTIES uploadHeapProperties{};
-		uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;// UploadHeap
-		//頂点リソースの設定
-		D3D12_RESOURCE_DESC vertexResourceDesc{};
-		//バッファリソース。テクスチャの場合はまた別の設定をする
-		vertexResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-		vertexResourceDesc.Width = sizeInBytes;//リソースのサイズ。今回はVector4を3頂点分 //バッファの場合はこれらは1にする決まり
-		vertexResourceDesc.Height = 1;
-		vertexResourceDesc.DepthOrArraySize = 1;
-		vertexResourceDesc.MipLevels = 1;
-		vertexResourceDesc.SampleDesc.Count = 1; //バッファの場合はこれにする決まり
-		vertexResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-		//実際に頂点リソースを作る
-		ID3D12Resource* resource = nullptr;
-		HRESULT hr = device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE,
-			&vertexResourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-			IID_PPV_ARGS(&resource));
-		assert(SUCCEEDED(hr));
-		return resource;
-	}
+
+}
+
+
+//Resource作成の関数化
+ID3D12Resource* CreateBufferResource(ID3D12Device* device, size_t sizeInBytes)
+{
+	//頂点リソース用のヒープの設定
+	D3D12_HEAP_PROPERTIES uploadHeapProperties{};
+	uploadHeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;// UploadHeap
+	//頂点リソースの設定
+	D3D12_RESOURCE_DESC vertexResourceDesc{};
+	//バッファリソース。テクスチャの場合はまた別の設定をする
+	vertexResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	vertexResourceDesc.Width = sizeInBytes;//リソースのサイズ。今回はVector4を3頂点分 //バッファの場合はこれらは1にする決まり
+	vertexResourceDesc.Height = 1;
+	vertexResourceDesc.DepthOrArraySize = 1;
+	vertexResourceDesc.MipLevels = 1;
+	vertexResourceDesc.SampleDesc.Count = 1; //バッファの場合はこれにする決まり
+	vertexResourceDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	//実際に頂点リソースを作る
+	ID3D12Resource* resource = nullptr;
+	HRESULT hr = device->CreateCommittedResource(&uploadHeapProperties, D3D12_HEAP_FLAG_NONE,
+		&vertexResourceDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+		IID_PPV_ARGS(&resource));
+	assert(SUCCEEDED(hr));
+	return resource;
+}
+
+// DescriptorHeap生成関数
+ID3D12DescriptorHeap* CreateDescriptorHeap(
+	ID3D12Device* device,
+	D3D12_DESCRIPTOR_HEAP_TYPE heapType,
+	UINT numDescriptors,
+	bool shaderVisible
+) {
+	D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc{};
+
+	descriptorHeapDesc.Type = heapType;
+	descriptorHeapDesc.NumDescriptors = numDescriptors;
+
+	// ShaderVisible設定
+	descriptorHeapDesc.Flags =
+		shaderVisible
+		? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
+		: D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+
+	ID3D12DescriptorHeap* descriptorHeap = nullptr;
+
+	HRESULT hr = device->CreateDescriptorHeap(
+		&descriptorHeapDesc,
+		IID_PPV_ARGS(&descriptorHeap)
+	);
+
+	assert(SUCCEEDED(hr));
+
+	return descriptorHeap;
+}
 
 
 // ==============================
@@ -561,7 +606,7 @@ int WINAPI WinMain(
 	// ==========================================
 	// PSO作成に必要なもの
 	// ==========================================
-		
+
 	// RootSignature作成
 	D3D12_ROOT_SIGNATURE_DESC descriptionRootSignature{};
 	descriptionRootSignature.Flags =
@@ -621,7 +666,7 @@ int WINAPI WinMain(
 
 
 	//ShaderをCompile
-	IDxcBlob* vertexShaderBlob = CompileShader(L"Object3D.VS.hlsl", 
+	IDxcBlob* vertexShaderBlob = CompileShader(L"Object3D.VS.hlsl",
 		L"vs_6_0", dxcUtils, dxcCompiler, dxcIncludeHandler);
 
 	assert(vertexShaderBlob != nullptr);
@@ -645,7 +690,7 @@ int WINAPI WinMain(
 	// 利用するトポロジ (形状)のタイプ。 三角形
 	graphicsPipelineStateDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	// どのように画面に色を打ち込むかの設定 (気にしなくて良い) 
-	graphicsPipelineStateDesc. SampleDesc.Count = 1; 
+	graphicsPipelineStateDesc.SampleDesc.Count = 1;
 	graphicsPipelineStateDesc.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
 	// 実際に生成
 	ID3D12PipelineState* graphicsPipelineState = nullptr;
@@ -668,7 +713,7 @@ int WINAPI WinMain(
 	Vector4* materialData = nullptr;
 	Matrix4x4* wvpData = nullptr;
 
-	materialResource->Map(0,nullptr,reinterpret_cast<void**>(&materialData));
+	materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
 	// 色設定
 	*materialData = { 1.0f, 0.0f, 0.0f, 1.0f }; // 赤
 
@@ -687,7 +732,7 @@ int WINAPI WinMain(
 	//書き込むためのアドレスを取得
 	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
 	wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
-	
+
 	//単位行列を書き込んでおく
 	*wvpData = MakeIdentity4x4();
 
@@ -742,8 +787,8 @@ int WINAPI WinMain(
 		);
 
 		infoQueue->SetBreakOnSeverity(
-		D3D12_MESSAGE_SEVERITY_WARNING,
-		TRUE
+			D3D12_MESSAGE_SEVERITY_WARNING,
+			TRUE
 		);
 
 		D3D12_MESSAGE_ID denyIds[] = {
@@ -850,25 +895,24 @@ int WINAPI WinMain(
 
 	assert(SUCCEEDED(hr));
 
-
 	// ==============================
 	// RTVヒープ生成
 	// ==============================
 
-	ID3D12DescriptorHeap* rtvHeap = nullptr;
-
-	D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc{};
-
-	rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-	rtvHeapDesc.NumDescriptors = 2;
-	rtvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-
-	hr = device->CreateDescriptorHeap(
-		&rtvHeapDesc,
-		IID_PPV_ARGS(&rtvHeap)
+	ID3D12DescriptorHeap* rtvHeap = CreateDescriptorHeap(
+		device,
+		D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+		2,
+		false
 	);
 
-	assert(SUCCEEDED(hr));
+	ID3D12DescriptorHeap* srvDescriptorheap = CreateDescriptorHeap(
+		device,
+		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+		128,
+		true
+	);
+
 
 
 	// ==============================
@@ -940,6 +984,25 @@ int WINAPI WinMain(
 		CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
 	assert(fenceEvent != nullptr);
+
+
+	#ifdef USE_IMGUI
+	//imGuiの初期化
+	//こういうものとしてとらえる
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGui::StyleColorsDark();
+	ImGui_ImplWin32_Init(hwnd);
+	ImGui_ImplDX12_Init(device,
+		swapChainDesc.BufferCount,
+		rtvDesc.Format,
+		srvDescriptorheap,
+		srvDescriptorheap->GetCPUDescriptorHandleForHeapStart(),
+		srvDescriptorheap->GetGPUDescriptorHandleForHeapStart());
+	ImGuiIO& io = ImGui::GetIO();
+	io.Fonts->Build();
+	#endif
+
 
 
 	//Transform構造体の定義
@@ -1065,13 +1128,39 @@ int WINAPI WinMain(
 				nullptr
 			);
 
+			// 描画用のDescriptor Heap の設定
+			ID3D12DescriptorHeap* descriptorHeaps[] = { srvDescriptorheap };
+			commandList->SetDescriptorHeaps(1, descriptorHeaps);
+
+
+			// ==========================================
+			// ImGui開始
+			// ==========================================
+			#ifdef USE_IMGUI
+			ImGui_ImplDX12_NewFrame();
+			ImGui_ImplWin32_NewFrame();
+			ImGui::NewFrame();
+
+			// DemoWindow表示
+			ImGui::ShowDemoWindow();
+			
+
+			// ==========================================
+			// ImGui終了
+			// ==========================================
+
+			ImGui::Render();
+			#endif
+
+
+
 			// WVP行列の更新
 			transform.rotate.y += 0.03f; // 毎フレームY軸に回転を加える
 			Matrix4x4 worldMatrix = MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
 			*wvpData = worldMatrix;
 
 			// 3次元的にする
-			Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate,cameraTransform.translate);
+			Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
 			Matrix4x4 viewMatrix = Inverse(cameraMatrix);
 			Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(kClientWidth) / float(kClientHeight), 0.1f, 100.0f);
 			//WVPMatrixを作る
@@ -1091,9 +1180,14 @@ int WINAPI WinMain(
 			//マテリアルCBufferの場所を設定
 			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress()); // Materialリソースの設定。RootParameterのShaderRegisterと合わせること
 			//WVP行列CBufferの場所を設定
-			commandList->SetGraphicsRootConstantBufferView(1,wvpResource->GetGPUVirtualAddress()); // WVPリソースの設定。RootParameterのShaderRegisterと合わせること
+			commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress()); // WVPリソースの設定。RootParameterのShaderRegisterと合わせること
 			//描画！　(DrawCall/ドローコール)。　3頂点で一つのインスタンス。インスタンスについては今後
 			commandList->DrawInstanced(3, 1, 0, 0);
+
+			#ifdef USE_IMGUI
+			// 実際のcommandListのImGuiの描画コマンドを積む
+			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
+			#endif
 
 			// ==========================================
 			// RENDER_TARGET → PRESENT
@@ -1178,6 +1272,13 @@ int WINAPI WinMain(
 		);
 	}
 
+	#ifdef USE_IMGUI
+	// ImGuiの終了処理。 
+	// こういうもの。 初期化と逆順に行う
+	ImGui_ImplDX12_Shutdown();
+	ImGui_ImplWin32_Shutdown();
+	ImGui::DestroyContext();
+	#endif
 
 	// ==============================
 	// 終了処理
@@ -1240,42 +1341,42 @@ int WINAPI WinMain(
 		factory = nullptr;
 	}
 
-	if(vertexResource){
+	if (vertexResource) {
 		vertexResource->Release();
 		vertexResource = nullptr;
 	}
 
-	if(graphicsPipelineState){
+	if (graphicsPipelineState) {
 		graphicsPipelineState->Release();
 		graphicsPipelineState = nullptr;
 	}
 
-	if(signatureBlob){
+	if (signatureBlob) {
 		signatureBlob->Release();
 		signatureBlob = nullptr;
 	}
 
-	if(errorBlob){
+	if (errorBlob) {
 		errorBlob->Release();
 		errorBlob = nullptr;
 	}
 
-	if(rootSignature){
+	if (rootSignature) {
 		rootSignature->Release();
 		rootSignature = nullptr;
 	}
 
-	if(pixelShaderBlob){
+	if (pixelShaderBlob) {
 		pixelShaderBlob->Release();
 		pixelShaderBlob = nullptr;
 	}
 
-	if(vertexShaderBlob){
+	if (vertexShaderBlob) {
 		vertexShaderBlob->Release();
 		vertexShaderBlob = nullptr;
 	}
 
-	if(materialResource){
+	if (materialResource) {
 		materialResource->Release();
 		materialResource = nullptr;
 	}
@@ -1283,6 +1384,18 @@ int WINAPI WinMain(
 	if (wvpResource) {
 		wvpResource->Release();
 		wvpResource = nullptr;
+	}
+
+	// Heap解放
+	if (srvDescriptorheap) {
+		srvDescriptorheap->Release();
+		srvDescriptorheap = nullptr;
+	}
+
+	// RTVHeap
+	if (rtvHeap) {
+		rtvHeap->Release();
+		rtvHeap = nullptr;
 	}
 
 #ifdef _DEBUG
