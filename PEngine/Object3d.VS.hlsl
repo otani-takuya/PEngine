@@ -8,6 +8,7 @@ cbuffer TransformationMatrix : register(b0)
 struct VertexShaderInput
 {
     float4 position : POSITION;
+    float2 texcoord : TEXCOORD0;
 };
 
 VertexShaderOutput main(VertexShaderInput input)
