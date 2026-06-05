@@ -1690,7 +1690,7 @@ int WINAPI WinMain(
 					triangle2Transform.scale,
 					triangle2Transform.rotate,
 					triangle2Transform.translate
-				);			
+				);
 
 			*wvpData[0] = worldMatrix1;
 			*wvpData[1] = worldMatrix2;
