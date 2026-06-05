@@ -787,7 +787,7 @@ int WINAPI WinMain(
 	D3D12_INPUT_ELEMENT_DESC inputElementDescs[2] = {};
 	inputElementDescs[0].SemanticName = "POSITION";
 	inputElementDescs[0].SemanticIndex = 0;
-	inputElementDescs[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+	inputElementDescs[0].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
 	inputElementDescs[0].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
 	inputElementDescs[1].SemanticName = "TEXCOORD";
 	inputElementDescs[1].SemanticIndex = 0;
@@ -857,7 +857,13 @@ int WINAPI WinMain(
 	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * 6);
 
 	//WVP用のリソースを作る。
-	ID3D12Resource* wvpResource = CreateBufferResource(device, sizeof(Matrix4x4));
+	ID3D12Resource* wvpResource[2];
+
+	wvpResource[0] =
+		CreateBufferResource(device, sizeof(Matrix4x4));
+
+	wvpResource[1] =
+		CreateBufferResource(device, sizeof(Matrix4x4));
 
 	// DepthStencil用のPSOの生成
 	graphicsPipelineStateDesc.DepthStencilState = depthStencilDesc;
@@ -873,7 +879,8 @@ int WINAPI WinMain(
 	ID3D12Resource* materialResource = CreateBufferResource(device, sizeof(Vector4));
 	// Materialデータを書き込む
 	Vector4* materialData = nullptr;
-	Matrix4x4* wvpData = nullptr;
+
+	Matrix4x4* wvpData[2] = {};
 
 	materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
 
@@ -897,10 +904,22 @@ int WINAPI WinMain(
 	VertexData* vertexData = nullptr;
 	//書き込むためのアドレスを取得
 	vertexResource->Map(0, nullptr, reinterpret_cast<void**>(&vertexData));
-	wvpResource->Map(0, nullptr, reinterpret_cast<void**>(&wvpData));
+
+	wvpResource[0]->Map(
+		0,
+		nullptr,
+		reinterpret_cast<void**>(&wvpData[0])
+	);
+
+	wvpResource[1]->Map(
+		0,
+		nullptr,
+		reinterpret_cast<void**>(&wvpData[1])
+	);
 
 	//単位行列を書き込んでおく
-	*wvpData = MakeIdentity4x4();
+	*wvpData[0] = MakeIdentity4x4();
+	*wvpData[1] = MakeIdentity4x4();
 
 	//三角形の頂点データ1
 	//左下
@@ -1116,30 +1135,78 @@ int WINAPI WinMain(
 
 
 	//Texture読み込み
-	DirectX::ScratchImage mipImages = LoadTexture("resources/uvChecker.png");
-	const DirectX::TexMetadata& metadata = mipImages.GetMetadata();
-	ID3D12Resource* textureResource = CreateTextureResource(device, metadata);
-	UploadTextureData(textureResource, mipImages);
+	const int kTextureCount = 3;
+
+	std::string texturePaths[kTextureCount] =
+	{
+		"resources/uvChecker.png",
+		"resources/monsterBall.png",
+		"resources/sky.png"
+	};
+
+	ID3D12Resource* textureResources[kTextureCount] = {};
+	for (int i = 0; i < kTextureCount; i++)
+	{
+		DirectX::ScratchImage mipImages =
+			LoadTexture(texturePaths[i]);
+
+		const DirectX::TexMetadata& metadata =
+			mipImages.GetMetadata();
+
+		textureResources[i] =
+			CreateTextureResource(device, metadata);
+
+		UploadTextureData(
+			textureResources[i],
+			mipImages
+		);
+	}
 
 	// ==========================================
 	// SRV作成
 	// ==========================================
 
-	// metaDataを基にSRVの設定
-	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-	srvDesc.Format = metadata.format;
-	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;//2Dテクスチャ
-	srvDesc.Texture2D.MipLevels = UINT(metadata.mipLevels);
+	D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandlesGPU[kTextureCount];
 
-	// SRVを作成するDescriptor Heapの場所を決める
-	D3D12_CPU_DESCRIPTOR_HANDLE textureSrvHandleCPU = srvDescriptorheap->GetCPUDescriptorHandleForHeapStart();
-	D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPU = srvDescriptorheap->GetGPUDescriptorHandleForHeapStart();
-	// 先頭はImGuiが使っているのでその次を使う
-	textureSrvHandleCPU.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	textureSrvHandleGPU.ptr += device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-	// SRVの生成
-	device->CreateShaderResourceView(textureResource, &srvDesc, textureSrvHandleCPU);
+	UINT descriptorSize =
+		device->GetDescriptorHandleIncrementSize(
+			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
+		);
+
+	for (int i = 0; i < kTextureCount; i++)
+	{
+		DirectX::ScratchImage mipImages =
+			LoadTexture(texturePaths[i]);
+
+		const DirectX::TexMetadata& metadata =
+			mipImages.GetMetadata();
+
+		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		srvDesc.Format = metadata.format;
+		srvDesc.Shader4ComponentMapping =
+			D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		srvDesc.ViewDimension =
+			D3D12_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MipLevels =
+			UINT(metadata.mipLevels);
+
+		D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle =
+			srvDescriptorheap->GetCPUDescriptorHandleForHeapStart();
+
+		D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle =
+			srvDescriptorheap->GetGPUDescriptorHandleForHeapStart();
+
+		cpuHandle.ptr += descriptorSize * (i + 1);
+		gpuHandle.ptr += descriptorSize * (i + 1);
+
+		textureSrvHandlesGPU[i] = gpuHandle;
+
+		device->CreateShaderResourceView(
+			textureResources[i],
+			&srvDesc,
+			cpuHandle
+		);
+	}
 
 
 
@@ -1238,9 +1305,38 @@ int WINAPI WinMain(
 
 
 	//Transform構造体の定義
-	Transform transform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
+
+	Transform triangle1Init{
+	{1.0f,1.0f,1.0f},
+	{0.0f,0.0f,0.0f},
+	{0.0f,0.0f,0.0f}
+	};
+
+	Transform triangle2Init{
+		{1.0f,1.0f,1.0f},
+		{0.0f,0.0f,0.0f},
+		{0.0f,0.0f,0.0f}
+	};
+
+	Transform triangle1Transform = triangle1Init;
+	Transform triangle2Transform = triangle2Init;
 
 	Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -5.0f} };
+
+	int triangle1Texture = 0;
+	int triangle2Texture = 0;
+
+	enum Scene
+	{
+		SCENE_TRIANGLE,
+		SCENE_PICTURE
+	};
+
+	Scene currentScene = SCENE_TRIANGLE;
+
+	bool preSpace = false;
+
+	float sceneTimer = 0.0f;
 
 
 	// ==============================
@@ -1265,6 +1361,49 @@ int WINAPI WinMain(
 			DispatchMessage(&msg);
 		}
 		else {
+
+			// ==========================================
+			// シーン切り替え
+			// ==========================================
+
+			bool nowSpace =
+				(GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+
+			if (nowSpace && !preSpace)
+			{
+				if (currentScene == SCENE_TRIANGLE)
+				{
+					currentScene = SCENE_PICTURE;
+
+					triangle1Transform.scale = { 0.1f,0.1f,0.1f };
+					triangle2Transform.scale = { 0.1f,0.1f,0.1f };
+
+					triangle1Transform.translate = { 0.0f,0.0f,20.0f };
+					triangle2Transform.translate = { 0.0f,0.0f,20.0f };
+				}
+				else
+				{
+					currentScene = SCENE_TRIANGLE;
+
+					triangle1Transform = triangle1Init;
+					triangle2Transform = triangle2Init;
+
+					sceneTimer = 0.0f;
+
+					materialColor =
+					{
+						1.0f,
+						1.0f,
+						1.0f,
+						1.0f
+					};
+
+					triangle1Texture = 0;
+					triangle2Texture = 0;
+				}
+			}
+
+			preSpace = nowSpace;
 
 			// ==========================================
 			// GPU待機
@@ -1384,9 +1523,74 @@ int WINAPI WinMain(
 			ImGui_ImplWin32_NewFrame();
 			ImGui::NewFrame();
 
+			ImGui::Begin("Triangle1");
+
+			ImGui::DragFloat3(
+				"Translate1",
+				&triangle1Transform.translate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"Rotate1",
+				&triangle1Transform.rotate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"Scale1",
+				&triangle1Transform.scale.x,
+				0.01f
+			);
+
+			ImGui::End();
+
+			ImGui::Begin("Triangle2");
+
+			ImGui::DragFloat3(
+				"Translate2",
+				&triangle2Transform.translate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"Rotate2",
+				&triangle2Transform.rotate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"Scale2",
+				&triangle2Transform.scale.x,
+				0.01f
+			);
+
+			ImGui::End();
+
 			ImGui::Begin("Material");
 
-			ImGui::ColorEdit4("Color", &materialColor.x);
+			ImGui::ColorEdit4(
+				"Color",
+				&materialColor.x
+			);
+
+			ImGui::End();
+
+			ImGui::Begin("Texture");
+
+			const char* textureNames[] =
+			{
+				"uvChecker",
+				"monsterBall",
+				"sky"
+			};
+
+			ImGui::Combo("Texture1", &triangle1Texture,
+				textureNames, IM_ARRAYSIZE(textureNames));
+
+			ImGui::Combo("Texture2", &triangle2Texture,
+				textureNames, IM_ARRAYSIZE(textureNames));
+
 
 			ImGui::End();
 
@@ -1399,12 +1603,98 @@ int WINAPI WinMain(
 			ImGui::Render();
 #endif
 
+			// ==========================================
+			// シーン更新
+			// ==========================================
 
+			if (currentScene == SCENE_PICTURE)
+			{
+				sceneTimer += 1.0f / 60.0f;
+
+				if (sceneTimer < 1.5f)
+				{
+					triangle1Transform.rotate.z += 0.4f;
+					triangle2Transform.rotate.z -= 0.4f;
+				}
+
+				if (sceneTimer >= 1.0f && sceneTimer < 2.0f)
+				{
+					triangle1Transform.translate.z -= 0.8f;
+					triangle2Transform.translate.z -= 0.8f;
+
+					if (triangle1Transform.translate.z < 0.0f)
+					{
+						triangle1Transform.translate.z = 0.0f;
+					}
+
+					if (triangle2Transform.translate.z < 0.0f)
+					{
+						triangle2Transform.translate.z = 0.0f;
+					}
+				}
+
+				if (sceneTimer >= 1.5f)
+				{
+					triangle1Transform.scale.x += 0.2f;
+					triangle1Transform.scale.y += 0.2f;
+
+					triangle2Transform.scale.x += 0.2f;
+					triangle2Transform.scale.y += 0.2f;
+
+					if (triangle1Transform.scale.x > 15.0f)
+					{
+						triangle1Transform.scale.x = 15.0f;
+						triangle1Transform.scale.y = 15.0f;
+						triangle1Transform.scale.z = 15.0f;
+					}
+
+					if (triangle2Transform.scale.x > 15.0f)
+					{
+						triangle2Transform.scale.x = 15.0f;
+						triangle2Transform.scale.y = 15.0f;
+						triangle2Transform.scale.z = 15.0f;
+					}
+				}
+
+				if (sceneTimer >= 2.5f)
+				{
+					float alpha = (sceneTimer - 2.5f) / 0.5f;
+
+					if (alpha > 1.0f)
+					{
+						alpha = 1.0f;
+					}
+
+					materialColor =
+					{
+						1.0f,
+						1.0f,
+						1.0f,
+						alpha
+					};
+				}
+			}
 
 			// WVP行列の更新
-			transform.rotate.y += 0.03f; // 毎フレームY軸に回転を加える
-			Matrix4x4 worldMatrix = MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
-			*wvpData = worldMatrix;
+			//transform.rotate.y += 0.03f; // 毎フレームY軸に回転を加える
+
+			Matrix4x4 worldMatrix1 =
+				MakeAffineMatrix(
+					triangle1Transform.scale,
+					triangle1Transform.rotate,
+					triangle1Transform.translate
+				);
+
+			Matrix4x4 worldMatrix2 =
+				MakeAffineMatrix(
+					triangle2Transform.scale,
+					triangle2Transform.rotate,
+					triangle2Transform.translate
+				);			
+
+			*wvpData[0] = worldMatrix1;
+			*wvpData[1] = worldMatrix2;
+
 			// 色更新
 			*materialData = materialColor;
 
@@ -1413,8 +1703,17 @@ int WINAPI WinMain(
 			Matrix4x4 viewMatrix = Inverse(cameraMatrix);
 			Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(kClientWidth) / float(kClientHeight), 0.1f, 100.0f);
 			//WVPMatrixを作る
-			Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
-			*wvpData = worldViewProjectionMatrix;
+			*wvpData[0] =
+				Multiply(
+					worldMatrix1,
+					Multiply(viewMatrix, projectionMatrix)
+				);
+
+			*wvpData[1] =
+				Multiply(
+					worldMatrix2,
+					Multiply(viewMatrix, projectionMatrix)
+				);
 
 			//三角形の描画
 			commandList->RSSetViewports(1, &viewport);			// ビューポートの設定
@@ -1428,11 +1727,62 @@ int WINAPI WinMain(
 			//マテリアルCBufferの場所を設定
 			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress()); // Materialリソースの設定。RootParameterのShaderRegisterと合わせること
 			//WVP行列CBufferの場所を設定
-			commandList->SetGraphicsRootConstantBufferView(1, wvpResource->GetGPUVirtualAddress()); // WVPリソースの設定。RootParameterのShaderRegisterと合わせること
-			//SRVのDescriptorTableの先頭を設定。2はrootParamater[2]である
-			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU); // SRVの設定。RootParameterのShaderRegisterと合わせること
-			//描画！　(DrawCall/ドローコール)。　3頂点で一つのインスタンス。インスタンスについては今後
-			commandList->DrawInstanced(6, 1, 0, 0);
+			// WVPリソースの設定。RootParameterのShaderRegisterと合わせること
+			if (currentScene == SCENE_TRIANGLE)
+			{
+				commandList->SetGraphicsRootDescriptorTable(
+					2,
+					textureSrvHandlesGPU[triangle1Texture]
+				);
+			}
+			else
+			{
+				commandList->SetGraphicsRootDescriptorTable(
+					2,
+					textureSrvHandlesGPU[2]
+				);
+			}
+
+			// Triangle1
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResource[0]->GetGPUVirtualAddress()
+			);
+
+			commandList->DrawInstanced(
+				3,
+				1,
+				0,
+				0
+			);
+
+			if (currentScene == SCENE_TRIANGLE)
+			{
+				commandList->SetGraphicsRootDescriptorTable(
+					2,
+					textureSrvHandlesGPU[triangle2Texture]
+				);
+			}
+			else
+			{
+				commandList->SetGraphicsRootDescriptorTable(
+					2,
+					textureSrvHandlesGPU[2]
+				);
+			}
+
+			// Triangle2
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResource[1]->GetGPUVirtualAddress()
+			);
+
+			commandList->DrawInstanced(
+				3,
+				1,
+				3,
+				0
+			);
 
 #ifdef USE_IMGUI
 			// 実際のcommandListのImGuiの描画コマンドを積む
@@ -1646,9 +1996,11 @@ int WINAPI WinMain(
 		materialResource = nullptr;
 	}
 
-	if (wvpResource) {
-		wvpResource->Release();
-		wvpResource = nullptr;
+	for (int i = 0; i < 2; i++) {
+		if (wvpResource[i]) {
+			wvpResource[i]->Release();
+			wvpResource[i] = nullptr;
+		}
 	}
 
 	// Heap解放
@@ -1664,11 +2016,14 @@ int WINAPI WinMain(
 	}
 
 	//Texture
-	if (textureResource) {
-		textureResource->Release();
-		textureResource = nullptr;
+	for (int i = 0; i < kTextureCount; i++)
+	{
+		if (textureResources[i])
+		{
+			textureResources[i]->Release();
+			textureResources[i] = nullptr;
+		}
 	}
-
 	// DxcIncludeHandler
 	if (dxcIncludeHandler) {
 		dxcIncludeHandler->Release();
@@ -1697,6 +2052,7 @@ int WINAPI WinMain(
 		depthStencilResource->Release();
 		depthStencilResource = nullptr;
 	}
+
 
 
 
