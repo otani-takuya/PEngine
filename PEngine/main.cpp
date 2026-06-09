@@ -2054,9 +2054,6 @@ int WINAPI WinMain(
 	}
 
 
-
-
-
 #ifdef _DEBUG
 
 	if (debugController) {
