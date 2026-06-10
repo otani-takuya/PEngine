@@ -787,7 +787,7 @@ int WINAPI WinMain(
 	D3D12_INPUT_ELEMENT_DESC inputElementDescs[2] = {};
 	inputElementDescs[0].SemanticName = "POSITION";
 	inputElementDescs[0].SemanticIndex = 0;
-	inputElementDescs[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+	inputElementDescs[0].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
 	inputElementDescs[0].AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
 	inputElementDescs[1].SemanticName = "TEXCOORD";
 	inputElementDescs[1].SemanticIndex = 0;
@@ -879,7 +879,15 @@ int WINAPI WinMain(
 	//1頂点当たりのサイズ
 	vertexBufferViewSprite.StrideInBytes = sizeof(VertexData);
 
-	//Sprite用のtransformationMatrix用のリソースを作る。
+	//Sprite用のtransformationMatrix用のリソースを作る。Matrix4x4 1つ分のサイズを用意
+	ID3D12Resource* transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(Matrix4x4));
+	// データを書き込む
+	Matrix4x4* transformationMatrixDataSprite = nullptr;
+	// 書き込むためのアドレスを取得
+	transformationMatrixResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&transformationMatrixDataSprite)); 
+	// 単位行列を書きこんでおく
+	*transformationMatrixDataSprite = MakeIdentity4x4();
+
 
 	// ==========================================
 	// MaterialResourceの生成
@@ -955,7 +963,7 @@ int WINAPI WinMain(
 	vertexDataSprite[3].position = { 0.0f, 0.0f, 0.0f, 1.0f };
 	vertexDataSprite[3].texcoord = { 0.0f, 0.0f };
 	vertexDataSprite[4].position = { 640.0f, 0.0f, 0.0f, 1.0f };
-	vertexDataSprite[4].texcoord = { 1.0f, 1.0f };
+	vertexDataSprite[4].texcoord = { 1.0f, 0.0f };
 	vertexDataSprite[5].position = { 640.0f, 360.0f, 0.0f, 1.0f };
 	vertexDataSprite[5].texcoord = { 1.0f, 1.0f };
 
@@ -1273,10 +1281,23 @@ int WINAPI WinMain(
 
 
 	//Transform構造体の定義
-	Transform transform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f} };
+	Transform transform{ 
+		{1.0f, 1.0f, 1.0f},
+		{0.0f, 0.0f, 0.0f},
+		{0.0f, 0.0f, 0.0f} 
+	};
 
-	Transform cameraTransform{ {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -5.0f} };
+	Transform cameraTransform{ 
+		{1.0f, 1.0f, 1.0f}, 
+		{0.0f, 0.0f, 0.0f},
+		{0.0f, 0.0f, -5.0f}
+	};
 
+	Transform transformSprite{
+		{1.0f, 1.0f, 1.0f },
+		{0.0f, 0.0f, 0.0f },
+		{0.0f, 0.0f, 0.0f}
+	};
 
 	// ==============================
 	// メインループ
@@ -1451,6 +1472,14 @@ int WINAPI WinMain(
 			Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
 			*wvpData = worldViewProjectionMatrix;
 
+			//Sprite用のWorldViewProjectionMatrixを作る
+			Matrix4x4 worldMatrixSprite = MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
+			Matrix4x4 ViewMatrixSprite = MakeIdentity4x4();
+			Matrix4x4 projectionMatrixSprite = MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
+			Matrix4x4 worldViewProjectionMatrixSprite = Multiply(worldMatrixSprite, Multiply(ViewMatrixSprite, projectionMatrixSprite));
+			*transformationMatrixDataSprite = worldViewProjectionMatrixSprite;
+
+
 			//三角形の描画
 			commandList->RSSetViewports(1, &viewport);			// ビューポートの設定
 			commandList->RSSetScissorRects(1, &scissorRect);	// シザリング矩形の設定
@@ -1467,6 +1496,13 @@ int WINAPI WinMain(
 			//SRVのDescriptorTableの先頭を設定。2はrootParamater[2]である
 			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU); // SRVの設定。RootParameterのShaderRegisterと合わせること
 			//描画！　(DrawCall/ドローコール)。　3頂点で一つのインスタンス。インスタンスについては今後
+			commandList->DrawInstanced(6, 1, 0, 0);
+
+			//Spriteの描画。変更が必要なものだけ変更する
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);			// VBVを設定
+			//TransformationMatrixCBufferの場所を設定
+			commandList->SetGraphicsRootConstantBufferView(1, transformationMatrixResourceSprite->GetGPUVirtualAddress());
+			//描画
 			commandList->DrawInstanced(6, 1, 0, 0);
 
 #ifdef USE_IMGUI
@@ -1733,7 +1769,15 @@ int WINAPI WinMain(
 		depthStencilResource = nullptr;
 	}
 
+	if (vertexResourceSprite) {
+		vertexResourceSprite->Release();
+		vertexResourceSprite = nullptr;
+	}
 
+	if (transformationMatrixResourceSprite) {
+		transformationMatrixResourceSprite->Release();
+		transformationMatrixResourceSprite = nullptr;
+	}
 
 
 #ifdef _DEBUG
