@@ -8,7 +8,9 @@ struct PixelShaderOutput
 cbuffer Material : register(b0)
 {
     float4 color;
+    int enableLighting;
 };
+
 
 Texture2D<float4> gTexture : register(t0);
 SamplerState gSampler : register(s0);
@@ -17,14 +19,52 @@ struct PixelShaderInput
 {
     float4 position : SV_POSITION;
     float2 texcoord : TEXCOORD0;
+    float3 normal : NORMAL0;
 };
+
+struct DirectionalLight
+{
+    float4 color; //ライトの色
+    float3 direction; //ライトの向き
+    float intensity; //輝度
+};
+
+cbuffer DirectionalLightBuffer : register(b1)
+{
+    DirectionalLight gDirectionalLight;
+};
+
 
 PixelShaderOutput main(PixelShaderInput input)
 {
     PixelShaderOutput output;
 
-    float4 textureColor = gTexture.Sample(gSampler, input.texcoord);
-    output.color = color * textureColor;
+    float4 textureColor =
+        gTexture.Sample(gSampler, input.texcoord);
+
+    if (enableLighting != 0)
+    {
+        float cos =
+            saturate(
+                dot(
+                    normalize(input.normal),
+                    -gDirectionalLight.direction
+                )
+            );
+
+        output.color =
+            color *
+            textureColor *
+            gDirectionalLight.color *
+            cos *
+            gDirectionalLight.intensity;
+    }
+    else
+    {
+        output.color =
+            color *
+            textureColor;
+    }
 
     return output;
 }
