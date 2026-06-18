@@ -863,7 +863,7 @@ int WINAPI WinMain(
 
 
 	//ShaderをCompile
-	IDxcBlob* vertexShaderBlob = CompileShader(L"Object3D.VS.hlsl",
+	IDxcBlob* vertexShaderBlob = CompileShader(L"Object3d.VS.hlsl",
 		L"vs_6_0", dxcUtils, dxcCompiler, dxcIncludeHandler);
 
 	assert(vertexShaderBlob != nullptr);
