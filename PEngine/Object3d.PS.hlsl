@@ -44,13 +44,14 @@ PixelShaderOutput main(PixelShaderInput input)
 
     if (enableLighting != 0)
     {
-        float cos =
-            saturate(
-                dot(
+        //half lambert
+        float NdotL = dot(
                     normalize(input.normal),
                     -gDirectionalLight.direction
-                )
-            );
+                );
+           
+        float cos = pow(NdotL * 0.5f + 0.5f, 2.0f);
+
 
         output.color =
             color *
