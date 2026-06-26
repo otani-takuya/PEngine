@@ -905,6 +905,9 @@ int WINAPI WinMain(
 	//VertexResourceの生成
 	ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * kVertexCount);
 
+	//indexResourceSpriteの生成
+	ID3D12Resource* indexResourceSprite = CreateBufferResource(device, sizeof(uint32_t) * 6);
+
 	//WVP用のResourceの生成
 	ID3D12Resource* wvpResource =CreateBufferResource(device,sizeof(TransformationMatrix));
 
@@ -987,6 +990,15 @@ int WINAPI WinMain(
 	// 1頂点あたりのサイズ
 	vertexBufferView.StrideInBytes = sizeof(VertexData);
 
+	//indexBufferViewの作成
+	D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
+	// リソースの先頭のアドレスから使う
+	indexBufferViewSprite.BufferLocation = indexResourceSprite->GetGPUVirtualAddress();
+	// 使用するリソースのサイズはインデックス6つ分のサイズ
+	indexBufferViewSprite.SizeInBytes = sizeof(uint32_t) * 6;
+	//インデックスはuint32_tとする
+	indexBufferViewSprite.Format = DXGI_FORMAT_R32_UINT;
+
 	// 頂点データをリソースにコピー
 	VertexData* vertexData = nullptr;
 	//書き込むためのアドレスを取得
@@ -1007,6 +1019,7 @@ int WINAPI WinMain(
 		nullptr,
 		reinterpret_cast<void**>(&directionalLightData)
 	);
+
 
 	// ライトの初期値
 	directionalLightData->color = { 1.0f,1.0f,1.0f,1.0f };
@@ -1138,20 +1151,20 @@ int WINAPI WinMain(
 	vertexResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&vertexDataSprite));
 
 	//Spriteの頂点データを設定
-	//1枚目の三角形
 	vertexDataSprite[0].position = { 0.0f, 360.0f, 0.0f, 1.0f };
 	vertexDataSprite[0].texcoord = { 0.0f, 1.0f };
 	vertexDataSprite[1].position = { 0.0f, 0.0f, 0.0f, 1.0f };
 	vertexDataSprite[1].texcoord = { 0.0f, 0.0f };
 	vertexDataSprite[2].position = { 640.0f, 360.0f, 0.0f, 1.0f };
 	vertexDataSprite[2].texcoord = { 1.0f, 1.0f };
-	//2枚目の三角形
-	vertexDataSprite[3].position = { 0.0f, 0.0f, 0.0f, 1.0f };
-	vertexDataSprite[3].texcoord = { 0.0f, 0.0f };
-	vertexDataSprite[4].position = { 640.0f, 0.0f, 0.0f, 1.0f };
-	vertexDataSprite[4].texcoord = { 1.0f, 0.0f };
-	vertexDataSprite[5].position = { 640.0f, 360.0f, 0.0f, 1.0f };
-	vertexDataSprite[5].texcoord = { 1.0f, 1.0f };
+	vertexDataSprite[3].position = { 640.0f, 0.0f, 0.0f, 1.0f };
+	vertexDataSprite[3].texcoord = { 1.0f, 0.0f };
+
+	//インデックスリソースにデータを書き込む
+	uint32_t* indexDataSprite = nullptr;
+	indexResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&indexDataSprite));
+	indexDataSprite[0] = 0;	indexDataSprite[1] = 1;	indexDataSprite[2] = 2;
+	indexDataSprite[3] = 1;	indexDataSprite[4] = 3;	indexDataSprite[5] = 2;
 
 	//Viewportの設定
 	D3D12_VIEWPORT viewport{};
@@ -1752,6 +1765,7 @@ int WINAPI WinMain(
 			commandList->SetGraphicsRootSignature(rootSignature); // RootSignatureの設定
 			commandList->SetPipelineState(graphicsPipelineState); // PSOの設定
 			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);			// 頂点バッファビューの設定
+			commandList->IASetIndexBuffer(&indexBufferViewSprite); //IBVを設定
 			//形状を設定。PSOに設定しているものとはまた別。同じものを設定すると考えておけばいい
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // トポロジの設定
 			//マテリアルCBufferの場所を設定
@@ -1779,7 +1793,7 @@ int WINAPI WinMain(
 				transformationMatrixResourceSprite->GetGPUVirtualAddress()
 			);
 			//描画
-			commandList->DrawInstanced(6, 1, 0, 0);
+			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 #ifdef USE_IMGUI
 			// 実際のcommandListのImGuiの描画コマンドを積む
@@ -2027,6 +2041,11 @@ int WINAPI WinMain(
 	if (vertexResourceSprite) {
 		vertexResourceSprite->Release();
 		vertexResourceSprite = nullptr;
+	}
+
+	if (indexResourceSprite) {
+		indexResourceSprite->Release();
+		indexResourceSprite = nullptr;
 	}
 
 	if (transformationMatrixResourceSprite) {
