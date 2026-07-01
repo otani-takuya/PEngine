@@ -16,6 +16,17 @@ Matrix4x4 MakeIdentity4x4() {
 	return result;
 }
 
+Matrix3x3 MakeIdentity3x3()
+{
+	Matrix3x3 matrix{};
+
+	matrix.m[0][0] = 1.0f;
+	matrix.m[1][1] = 1.0f;
+	matrix.m[2][2] = 1.0f;
+
+	return matrix;
+}
+
 // ==============================
 // 平行移動行列
 // ==============================

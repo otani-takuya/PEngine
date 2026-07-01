@@ -30,6 +30,11 @@ struct Matrix4x4 {
 	float m[4][4];
 };
 
+// 3x3行列
+struct Matrix3x3 {
+	float m[3][3];
+};
+
 // ==============================
 // 行列関数
 // ==============================
@@ -98,3 +103,13 @@ Matrix4x4 MakeViewportMatrix(
 
 // ベクトル変換
 Vector3 VectorTransform(const Vector3& vector, const Matrix4x4& matrix);
+
+// ==============================
+// 行列関数
+// ==============================
+
+// 単位行列
+Matrix4x4 MakeIdentity4x4();
+
+// 3x3単位行列
+Matrix3x3 MakeIdentity3x3();

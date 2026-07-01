@@ -64,6 +64,8 @@ struct VertexData {
 struct Material {
 	Vector4 color;
 	int32_t enableLighting;
+	float padding[3];
+	Matrix4x4 uvTransform;
 };
 
 struct TransformationMatrix {
@@ -75,8 +77,8 @@ struct DirectionalLight {
 	Vector4 color;		//ライトの色
 	Vector3 direction;	//ライトの向き
 	float intensity;	//輝度
-};
 
+};
 const uint32_t kSubdivision = 16;
 const uint32_t kVertexCount = kSubdivision * kSubdivision * 6;
 const float pi = 3.1415926535f;
@@ -789,12 +791,12 @@ int WINAPI WinMain(
 	//RootParameterを作成。複数設定できるので配列にする。今回は結果一つだけなので長さ１の配列
 	D3D12_ROOT_PARAMETER rootParameters[4] = {};
 	rootParameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;		// CVBを使う。b0のbと一致する
-	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;		// PixelShaderで使う
+	rootParameters[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;		// PixelShaderで使う
 	rootParameters[0].Descriptor.ShaderRegister = 0;						// レジスタ番号0。b0のbと一致する。もしb11と紐づけたいなら11となる
 
 	rootParameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;		// CVBを使う。b1のbと一致する
 	rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;	// VertexShaderで使う
-	rootParameters[1].Descriptor.ShaderRegister = 0;						// レジスタ番号0。b1のbと一致する。もしb11と紐づけたいなら11となる
+	rootParameters[1].Descriptor.ShaderRegister = 1;						// レジスタ番号1。b1のbと一致する。もしb11と紐づけたいなら11となる
 
 	rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;	// ディスクリプタテーブルを使う
 	rootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;		// PixelShaderで使う
@@ -960,6 +962,7 @@ int WINAPI WinMain(
 
 	materialDataSprite->color = { 1.0f,1.0f,1.0f,1.0f };
 	materialDataSprite->enableLighting = false;
+	materialDataSprite->uvTransform = MakeIdentity4x4();
 
 
 	// ==========================================
@@ -979,6 +982,8 @@ int WINAPI WinMain(
 	// 初期値を書き込む
 	materialData->color = materialColor;
 	materialData->enableLighting = true;
+	materialData->uvTransform = MakeIdentity4x4();
+
 
 	//VertexBufferViewの作成
 	// 頂点バッファビューを作成する
@@ -1558,6 +1563,11 @@ int WINAPI WinMain(
 		{0.0f, 0.0f, 0.0f}
 	};
 
+	Transform uvTransformSprite{
+	{1.0f, 1.0f, 1.0f},
+	{0.0f, 0.0f, 0.0f},
+	{0.0f, 0.0f, 0.0f}
+	};
 	
 
 	bool useMonsterBall = true;
@@ -1710,7 +1720,9 @@ int WINAPI WinMain(
 			ImGui::ColorEdit4("Color", &materialColor.x);
 			ImGui::Checkbox("useMonsterBall", &useMonsterBall);
 
+
 			// ===== ライト操作 =====
+			ImGui::Separator();
 			ImGui::Text("Directional Light");
 
 			// 色
@@ -1721,6 +1733,13 @@ int WINAPI WinMain(
 
 			// 強さ
 			ImGui::DragFloat("Intensity", &directionalLightData->intensity, 0.01f, 0.0f, 10.0f);
+
+			// ===== uvTransform操作 =====
+			ImGui::Separator();
+			ImGui::Text("uvTransform Sprite");
+			ImGui::DragFloat2("uvTransform Translate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
+			ImGui::DragFloat2("uvTransform Scale", &uvTransformSprite.scale.x, 0.01f, 0.0f, 10.0f);
+			ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
 
 			ImGui::End();
 
@@ -1739,6 +1758,24 @@ int WINAPI WinMain(
 			// 色更新
 			materialData->color = materialColor;
 			materialData->enableLighting = true;
+
+			// 色更新
+			materialData->color = materialColor;
+			materialData->enableLighting = true;
+
+			// UVTransform更新
+			Matrix4x4 uvTransformMatrix =
+				MakeScaleMatrix(uvTransformSprite.scale);
+
+			uvTransformMatrix =
+				Multiply(uvTransformMatrix, 
+					MakeRotateZMatrix(uvTransformSprite.rotate.z));
+
+			uvTransformMatrix =
+				Multiply(uvTransformMatrix, 
+					MakeTranslateMatrix(uvTransformSprite.translate));
+
+			materialDataSprite->uvTransform = uvTransformMatrix;
 
 			// 3次元的にする
 			Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);

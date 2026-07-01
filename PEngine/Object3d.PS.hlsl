@@ -9,6 +9,7 @@ cbuffer Material : register(b0)
 {
     float4 color;
     int enableLighting;
+    float4x4 uvTransform;
 };
 
 
