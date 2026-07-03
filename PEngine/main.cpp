@@ -870,7 +870,7 @@ int WINAPI WinMain(
 
 	assert(vertexShaderBlob != nullptr);
 
-	IDxcBlob* pixelShaderBlob = CompileShader(L"Object3D.PS.hlsl",
+	IDxcBlob* pixelShaderBlob = CompileShader(L"Object3d.PS.hlsl",
 		L"ps_6_0", dxcUtils, dxcCompiler, dxcIncludeHandler);
 
 	assert(pixelShaderBlob != nullptr);
