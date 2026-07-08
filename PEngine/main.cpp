@@ -50,6 +50,9 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 
 #include "externals/DirectXTex/DirectXTex.h"
 
+#include <wrl.h>
+using Microsoft::WRL::ComPtr;
+
 //Transform構造体
 struct Transform
 {
@@ -573,6 +576,10 @@ ModelData LoadObjectFile(const std::string& directoryPath, const std::string& fi
 		if (identifier == "v") {
 			Vector4 position;
 			s >> position.x >> position.y >> position.z;
+
+			// 右手系 → 左手系へ変換
+			position.x *= -1.0f;
+
 			position.w = 1.0f;
 			positions.push_back(position);
 		}
@@ -582,14 +589,19 @@ ModelData LoadObjectFile(const std::string& directoryPath, const std::string& fi
 			s >> texcoord.x >> texcoord.y;
 
 			// OBJとDirectXでV方向が逆なので反転する
+			texcoord.x = 1.0f - texcoord.x;
 			texcoord.y = 1.0f - texcoord.y;
 
 			texcoords.push_back(texcoord);
 		}
-		else if (identifier == "vn") 
+		else if (identifier == "vn")
 		{
 			Vector3 normal;
 			s >> normal.x >> normal.y >> normal.z;
+
+			// 右手系 → 左手系へ変換
+			normal.x *= -1.0f;
+
 			normals.push_back(normal);
 		}
 		else if (identifier == "f") 
@@ -1040,7 +1052,7 @@ int WINAPI WinMain(
 	// ModelData用
 	//==============================
 	//モデル読み込み
-	ModelData modelData = LoadObjectFile("resources", "axis.obj");
+	ModelData modelData = LoadObjectFile("resources", "plane.obj");
 	//頂点リソースを作る
 	ID3D12Resource* vertexResource =
 		CreateBufferResource(device,
