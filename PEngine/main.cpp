@@ -57,6 +57,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 #include <wrl.h>
 //using Microsoft::WRL::ComPtr;
 
+#include "Input.h"
+
 //Transform構造体
 struct Transform
 {
@@ -1190,6 +1192,13 @@ int WINAPI WinMain(
 	//比較関数はLessEqual。近いものほど前に表示される
 	depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
+	// ==========================================
+	// 入力処理初期化処理
+	// ==========================================
+
+	Input::Initialize(hInstance, hwnd);
+
+
 	//==============================
 	// 球生成用
 	//==============================
@@ -1956,6 +1965,31 @@ int WINAPI WinMain(
 			}
 
 			// ==========================================
+			// キーボード情報の取得
+			// ==========================================
+
+			Input::Update();
+
+			//使い方サンプル
+			//数字の0キーが押されていたら
+			// 押している間
+			if (Input::PushKey(DIK_0)) {
+				OutputDebugStringA("Hit 0\n");	//出力ウィンドウに「Hit 0」と表示
+			}
+
+			// 押した瞬間
+			if (Input::TriggerKey(DIK_1)) {
+				//音声再生
+				SoundPlayWave(xAudio2.Get(), soundData1);
+			}
+
+			// 離した瞬間
+			if (Input::ReleaseKey(DIK_2)) {
+				OutputDebugStringA("Hit 2\n");	
+			}
+
+
+			// ==========================================
 			// Reset
 			// ==========================================
 
@@ -2003,6 +2037,8 @@ int WINAPI WinMain(
 
 			commandList->ResourceBarrier(1, &barrier);
 
+
+
 			// ==========================================
 			// 描画先設定
 			// ==========================================
@@ -2048,8 +2084,6 @@ int WINAPI WinMain(
 
 			commandList->SetDescriptorHeaps(1, descriptorHeaps);
 
-			//音声再生
-			SoundPlayWave(xAudio2.Get(), soundData1);
 
 			// ==========================================
 			// ImGui開始
@@ -2354,6 +2388,7 @@ int WINAPI WinMain(
 
 	DestroyWindow(hwnd);
 
+	Input::Finalize();
 	CoUninitialize();
 
 	return 0;
