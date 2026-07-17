@@ -42,6 +42,8 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dxguid.lib")
 
+#include "DebugCamera.h"
+
 #pragma warning(pop)
 
 
@@ -58,6 +60,8 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 //using Microsoft::WRL::ComPtr;
 
 #include "Input.h"
+
+DebugCamera* gDebugCamera = nullptr;
 
 //Transform構造体
 struct Transform
@@ -117,7 +121,7 @@ struct D3D12ResourceLeakChecker {
 };
 
 //チャンクヘッダ
-struct ChunkHeader{
+struct ChunkHeader {
 	char id[4];		//チャンク毎ID
 	int32_t size;	//チャンクサイズ
 };
@@ -228,6 +232,8 @@ std::string ConvertString(const std::wstring& str) {
 }
 
 
+
+
 // ==============================
 // ウィンドウプロシージャ
 // ==============================
@@ -247,6 +253,22 @@ LRESULT CALLBACK WindowProc(
 #endif
 
 	switch (msg) {
+
+	case WM_MOUSEWHEEL:
+
+		if (gDebugCamera != nullptr) {
+
+			const short wheel =
+				GET_WHEEL_DELTA_WPARAM(wparam);
+
+			gDebugCamera->AddWheelDelta(
+				static_cast<float>(wheel) /
+				static_cast<float>(WHEEL_DELTA)
+			);
+		}
+
+		return 0;
+
 
 	case WM_DESTROY:
 
@@ -629,7 +651,7 @@ ModelData LoadObjectFile(const std::string& directoryPath, const std::string& fi
 			position.w = 1.0f;
 			positions.push_back(position);
 		}
-		else if (identifier == "vt") 
+		else if (identifier == "vt")
 		{
 			Vector2 texcoord;
 			s >> texcoord.x >> texcoord.y;
@@ -650,7 +672,7 @@ ModelData LoadObjectFile(const std::string& directoryPath, const std::string& fi
 
 			normals.push_back(normal);
 		}
-		else if (identifier == "f") 
+		else if (identifier == "f")
 		{
 			VertexData triangle[3];
 			// 面は三角形限定。 その他は未対応
@@ -678,7 +700,7 @@ ModelData LoadObjectFile(const std::string& directoryPath, const std::string& fi
 			modelData.vertices.push_back(triangle[1]);
 			modelData.vertices.push_back(triangle[0]);
 		}
-		else if (identifier == "mtllib") 
+		else if (identifier == "mtllib")
 		{
 			//materialTemplateLibraryファイルの名前を取得する
 			std::string materialFilename;
@@ -686,7 +708,7 @@ ModelData LoadObjectFile(const std::string& directoryPath, const std::string& fi
 			//基本的にobjファイルと同一階層にmtlは存在させるので、ディレクトリ名とファイル名を探す
 			modelData.material = LoadMaterialTemplateFile(directoryPath, materialFilename);
 		}
-		
+
 	}
 
 	//4. ModelDataを返す
@@ -734,7 +756,7 @@ SoundData SoundLoadWave(const char* filename) {
 	//JUNKチャンクを検出した場合
 	if (strncmp(data.id, "JUNK", 4) == 0) {
 		// 読み取り位置をJUNKチャンクの終わりまで進める
-		file.seekg(data.size, std::ios_base::cur); 
+		file.seekg(data.size, std::ios_base::cur);
 		// 再読み込み
 		file.read((char*)&data, sizeof(data));
 	}
@@ -760,10 +782,10 @@ SoundData SoundLoadWave(const char* filename) {
 
 	//④読み込んだ音声データをreturn
 	//returnする為の音声データ
-	SoundData soundData ={};
+	SoundData soundData = {};
 
 	soundData.wfex = format.fmt;
-	soundData.pBuffer = reinterpret_cast<BYTE*>(pBuffer); 
+	soundData.pBuffer = reinterpret_cast<BYTE*>(pBuffer);
 	soundData.bufferSize = data.size;
 	return soundData;
 }
@@ -1257,7 +1279,7 @@ int WINAPI WinMain(
 	// 書き込むためのアドレスを取得
 	transformationMatrixResourceSprite->Map(0, nullptr, reinterpret_cast<void**>(&transformationMatrixDataSprite));
 	// 単位行列を書きこんでおく
-	*transformationMatrixDataSprite = MakeIdentity4x4();
+	*transformationMatrixDataSprite = Matrix::MakeIdentity4x4();
 
 	// Sprite用Material
 	Microsoft::WRL::ComPtr<ID3D12Resource> materialResourceSprite =
@@ -1273,7 +1295,7 @@ int WINAPI WinMain(
 
 	materialDataSprite->color = { 1.0f,1.0f,1.0f,1.0f };
 	materialDataSprite->enableLighting = false;
-	materialDataSprite->uvTransform = MakeIdentity4x4();
+	materialDataSprite->uvTransform = Matrix::MakeIdentity4x4();
 
 
 	// ==========================================
@@ -1293,7 +1315,7 @@ int WINAPI WinMain(
 	// 初期値を書き込む
 	materialData->color = materialColor;
 	materialData->enableLighting = true;
-	materialData->uvTransform = MakeIdentity4x4();
+	materialData->uvTransform = Matrix::MakeIdentity4x4();
 
 
 	//VertexBufferViewの作成
@@ -1302,7 +1324,7 @@ int WINAPI WinMain(
 	// リソースの先頭のアドレスから使う
 	vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
 	// 使用するリソースのサイズは頂点のサイズ
-	
+
 	// 球生成
 	// vertexBufferView.SizeInBytes = sizeof(VertexData) * kVertexCount;
 
@@ -1922,6 +1944,17 @@ int WINAPI WinMain(
 	//音声読み込み
 	SoundData soundData1 = SoundLoadWave("resources/Alarm01.wav");
 
+
+	DebugCamera debugCamera;
+	debugCamera.Initialize();
+
+	// WindowProcから触れるようにする
+	gDebugCamera = &debugCamera;
+
+	// false：通常カメラ
+	// true ：デバッグカメラ
+	bool isDebugCamera = false;
+
 	// ==============================
 	// メインループ
 	// ==============================
@@ -1985,9 +2018,27 @@ int WINAPI WinMain(
 
 			// 離した瞬間
 			if (Input::ReleaseKey(DIK_2)) {
-				OutputDebugStringA("Hit 2\n");	
+				OutputDebugStringA("Hit 2\n");
 			}
 
+
+			// F1：通常カメラとデバッグカメラを切り替え
+			if (Input::TriggerKey(DIK_F1)) {
+				isDebugCamera = !isDebugCamera;
+			}
+
+			// F2：デバッグカメラのモード切り替え
+			if (
+				isDebugCamera &&
+				Input::TriggerKey(DIK_F2)
+				) {
+				debugCamera.ToggleMode();
+			}
+
+			// デバッグカメラ中だけ更新
+			if (isDebugCamera) {
+				debugCamera.Update();
+			}
 
 			// ==========================================
 			// Reset
@@ -2128,6 +2179,177 @@ int WINAPI WinMain(
 			ImGui::DragFloat2("uvTransform Scale", &uvTransformSprite.scale.x, 0.01f, 0.0f, 10.0f);
 			ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
 
+			// ===== デバッグカメラ操作 =====
+			ImGui::Separator();
+			ImGui::Text("Debug Camera");
+
+			// 通常カメラとデバッグカメラ切り替え
+			ImGui::Checkbox("Use Debug Camera", &isDebugCamera);
+
+			if (isDebugCamera) {
+
+				int cameraMode =
+					static_cast<int>(
+						debugCamera.GetMode()
+						);
+
+				const char* modeNames[] = {
+					"Orbit",
+					"Free"
+				};
+
+				if (ImGui::Combo(
+					"Camera Mode",
+					&cameraMode,
+					modeNames,
+					IM_ARRAYSIZE(modeNames)
+				)) {
+					debugCamera.SetMode(
+						static_cast<DebugCamera::Mode>(
+							cameraMode
+							)
+					);
+				}
+
+				if (
+					debugCamera.GetMode() ==
+					DebugCamera::Mode::kOrbit
+					) {
+
+					ImGui::Text("Orbit Camera");
+
+					// 注目点
+					ImGui::DragFloat3(
+						"Camera Target",
+						&debugCamera.GetTarget().x,
+						0.01f
+					);
+
+					// 回転
+					ImGui::SliderAngle(
+						"Camera Rotate X",
+						&debugCamera.GetRotation().x,
+						-89.0f,
+						89.0f
+					);
+
+					ImGui::SliderAngle(
+						"Camera Rotate Y",
+						&debugCamera.GetRotation().y,
+						-180.0f,
+						180.0f
+					);
+
+					// 距離
+					ImGui::DragFloat(
+						"Camera Distance",
+						&debugCamera.GetDistance(),
+						0.1f,
+						0.5f,
+						500.0f
+					);
+
+					// 操作速度
+					ImGui::DragFloat(
+						"Camera Rotate Speed",
+						&debugCamera.GetRotateSpeed(),
+						0.0001f,
+						0.0001f,
+						0.1f,
+						"%.4f"
+					);
+
+					ImGui::DragFloat(
+						"Camera Pan Speed",
+						&debugCamera.GetPanSpeed(),
+						0.001f,
+						0.001f,
+						1.0f,
+						"%.3f"
+					);
+
+					ImGui::DragFloat(
+						"Camera Zoom Speed",
+						&debugCamera.GetZoomSpeed(),
+						0.01f,
+						0.01f,
+						10.0f
+					);
+
+					ImGui::Text(
+						"Middle Drag : Orbit"
+					);
+
+					ImGui::Text(
+						"Shift + Middle Drag : Pan"
+					);
+
+					ImGui::Text(
+						"Mouse Wheel : Zoom"
+					);
+
+				}
+				else {
+
+					ImGui::Text("Free Camera");
+
+					ImGui::DragFloat3(
+						"Camera Position",
+						&debugCamera.GetTranslation().x,
+						0.01f
+					);
+
+					ImGui::DragFloat(
+						"Move Speed",
+						&debugCamera.GetMoveSpeed(),
+						0.01f,
+						0.01f,
+						10.0f
+					);
+
+					ImGui::Text(
+						"Right Drag : Rotate"
+					);
+
+					ImGui::Text(
+						"WASD : Move"
+					);
+
+					ImGui::Text(
+						"Space / Shift : Up Down"
+					);
+				}
+
+				ImGui::SliderAngle(
+					"Camera Rotate X",
+					&debugCamera.GetRotation().x,
+					-89.0f,
+					89.0f
+				);
+
+				ImGui::SliderAngle(
+					"Camera Rotate Y",
+					&debugCamera.GetRotation().y,
+					-180.0f,
+					180.0f
+				);
+
+				ImGui::DragFloat(
+					"Rotate Speed",
+					&debugCamera.GetRotateSpeed(),
+					0.0001f,
+					0.0001f,
+					0.1f,
+					"%.4f"
+				);
+
+				if (ImGui::Button(
+					"Reset Debug Camera"
+				)) {
+					debugCamera.Reset();
+				}
+			}
+
 			ImGui::End();
 
 
@@ -2137,10 +2359,11 @@ int WINAPI WinMain(
 			// ==========================================
 
 			ImGui::Render();
+
 #endif
 			// WVP行列の更新
 			//transform.rotate.y += 0.03f; // 毎フレームY軸に回転を加える
-			Matrix4x4 worldMatrix = MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
+			Matrix4x4 worldMatrix = Matrix::MakeAffineMatrix(transform.scale, transform.rotate, transform.translate);
 			wvpData->World = worldMatrix;
 			// 色更新
 			materialData->color = materialColor;
@@ -2152,33 +2375,64 @@ int WINAPI WinMain(
 
 			// UVTransform更新
 			Matrix4x4 uvTransformMatrix =
-				MakeScaleMatrix(uvTransformSprite.scale);
+				Matrix::MakeScaleMatrix(uvTransformSprite.scale);
 
 			uvTransformMatrix =
-				Multiply(uvTransformMatrix,
-					MakeRotateZMatrix(uvTransformSprite.rotate.z));
+				Matrix::Multiply(uvTransformMatrix,
+					Matrix::MakeRotateZMatrix(uvTransformSprite.rotate.z));
 
 			uvTransformMatrix =
-				Multiply(uvTransformMatrix,
-					MakeTranslateMatrix(uvTransformSprite.translate));
+				Matrix::Multiply(uvTransformMatrix,
+					Matrix::MakeTranslateMatrix(uvTransformSprite.translate));
 
 			materialDataSprite->uvTransform = uvTransformMatrix;
 
-			// 3次元的にする
-			Matrix4x4 cameraMatrix = MakeAffineMatrix(cameraTransform.scale, cameraTransform.rotate, cameraTransform.translate);
-			Matrix4x4 viewMatrix = Inverse(cameraMatrix);
-			Matrix4x4 projectionMatrix = MakePerspectiveFovMatrix(0.45f, float(kClientWidth) / float(kClientHeight), 0.1f, 100.0f);
+
+			// ==========================================
+			// カメラ切り替え
+			// ==========================================
+			// 使用するビュー行列
+			Matrix4x4 viewMatrix{};
+
+			if (isDebugCamera) {
+
+				// Blender風デバッグカメラ
+				viewMatrix = debugCamera.GetViewMatrix();
+
+			}
+			else {
+
+				// 今まで使用していた通常カメラ
+				const Matrix4x4 cameraMatrix =
+					Matrix::MakeAffineMatrix(
+						cameraTransform.scale,
+						cameraTransform.rotate,
+						cameraTransform.translate
+					);
+
+				viewMatrix = Matrix::Inverse(cameraMatrix);
+			}
+
+			// 射影行列
+			Matrix4x4 projectionMatrix =
+				Matrix::MakePerspectiveFovMatrix(
+					0.45f,
+					float(kClientWidth) / float(kClientHeight),
+					0.1f,
+					100.0f
+				);
+
 			//WVPMatrixを作る
-			Matrix4x4 worldViewProjectionMatrix = Multiply(worldMatrix, Multiply(viewMatrix, projectionMatrix));
+			Matrix4x4 worldViewProjectionMatrix = Matrix::Multiply(worldMatrix, Matrix::Multiply(viewMatrix, projectionMatrix));
 			wvpData->WVP = worldViewProjectionMatrix;
 			wvpData->World = worldMatrix;
 
 
 			//Sprite用のWorldViewProjectionMatrixを作る
-			Matrix4x4 worldMatrixSprite = MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
-			Matrix4x4 ViewMatrixSprite = MakeIdentity4x4();
-			Matrix4x4 projectionMatrixSprite = MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
-			Matrix4x4 worldViewProjectionMatrixSprite = Multiply(worldMatrixSprite, Multiply(ViewMatrixSprite, projectionMatrixSprite));
+			Matrix4x4 worldMatrixSprite = Matrix::MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
+			Matrix4x4 ViewMatrixSprite = Matrix::MakeIdentity4x4();
+			Matrix4x4 projectionMatrixSprite = Matrix::MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
+			Matrix4x4 worldViewProjectionMatrixSprite = Matrix::Multiply(worldMatrixSprite, Matrix::Multiply(ViewMatrixSprite, projectionMatrixSprite));
 			*transformationMatrixDataSprite = worldViewProjectionMatrixSprite;
 
 
@@ -2205,7 +2459,7 @@ int WINAPI WinMain(
 			// commandList->DrawInstanced(kVertexCount, 1, 0, 0);
 
 			// ModelData
-			commandList->DrawInstanced(UINT(modelData.vertices.size()),1,0,0 );
+			commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
 
 			/*
 			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
@@ -2381,7 +2635,7 @@ int WINAPI WinMain(
 	if (infoQueue) {
 		infoQueue->Release();
 		infoQueue = nullptr;
-	}	
+	}
 
 
 #endif

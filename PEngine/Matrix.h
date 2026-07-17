@@ -36,80 +36,121 @@ struct Matrix3x3 {
 };
 
 // ==============================
-// 行列関数
+// Matrixクラス
 // ==============================
+class Matrix {
+public:
 
-// 単位行列
-Matrix4x4 MakeIdentity4x4();
+	// ==============================
+	// 単位行列
+	// ==============================
 
-// 平行移動行列
-Matrix4x4 MakeTranslateMatrix(const Vector3& translate);
+	// 4x4単位行列
+	static Matrix4x4 MakeIdentity4x4();
 
-// 拡大縮小行列
-Matrix4x4 MakeScaleMatrix(const Vector3& scale);
+	// 3x3単位行列
+	static Matrix3x3 MakeIdentity3x3();
 
-// X軸回転行列
-Matrix4x4 MakeRotateXMatrix(float radian);
+	// ==============================
+	// 基本変換行列
+	// ==============================
 
-// Y軸回転行列
-Matrix4x4 MakeRotateYMatrix(float radian);
+	// 平行移動行列
+	static Matrix4x4 MakeTranslateMatrix(
+		const Vector3& translate
+	);
 
-// Z軸回転行列
-Matrix4x4 MakeRotateZMatrix(float radian);
+	// 拡大縮小行列
+	static Matrix4x4 MakeScaleMatrix(
+		const Vector3& scale
+	);
 
-// アフィン変換行列
-Matrix4x4 MakeAffineMatrix(
-	const Vector3& scale,
-	const Vector3& rotate,
-	const Vector3& translate
-);
+	// X軸回転行列
+	static Matrix4x4 MakeRotateXMatrix(
+		float radian
+	);
 
-// 行列積
-Matrix4x4 Multiply(const Matrix4x4& m1, const Matrix4x4& m2);
+	// Y軸回転行列
+	static Matrix4x4 MakeRotateYMatrix(
+		float radian
+	);
 
-// 逆行列
-Matrix4x4 Inverse(const Matrix4x4& matrix);
+	// Z軸回転行列
+	static Matrix4x4 MakeRotateZMatrix(
+		float radian
+	);
 
-// 転置行列
-Matrix4x4 Transpose(const Matrix4x4& matrix);
+	// アフィン変換行列
+	static Matrix4x4 MakeAffineMatrix(
+		const Vector3& scale,
+		const Vector3& rotate,
+		const Vector3& translate
+	);
 
-// 透視投影行列
-Matrix4x4 MakePerspectiveFovMatrix(
-	float fovY,
-	float aspectRatio,
-	float nearClip,
-	float farClip
-);
+	// ==============================
+	// 行列演算
+	// ==============================
 
-// 正射影行列
-Matrix4x4 MakeOrthographicMatrix(
-	float left,
-	float top,
-	float right,
-	float bottom,
-	float nearClip,
-	float farClip
-);
+	// 行列積
+	static Matrix4x4 Multiply(
+		const Matrix4x4& m1,
+		const Matrix4x4& m2
+	);
 
-// ビューポート変換行列
-Matrix4x4 MakeViewportMatrix(
-	float left,
-	float top,
-	float width,
-	float height,
-	float minDepth,
-	float maxDepth
-);
+	// 逆行列
+	static Matrix4x4 Inverse(
+		const Matrix4x4& matrix
+	);
 
-// ベクトル変換
-Vector3 VectorTransform(const Vector3& vector, const Matrix4x4& matrix);
+	// 転置行列
+	static Matrix4x4 Transpose(
+		const Matrix4x4& matrix
+	);
 
-// ==============================
-// 行列関数
-// ==============================
+	// ==============================
+	// 投影・ビュー変換
+	// ==============================
 
-// 単位行列
-Matrix4x4 MakeIdentity4x4();
+	// 透視投影行列
+	static Matrix4x4 MakePerspectiveFovMatrix(
+		float fovY,
+		float aspectRatio,
+		float nearClip,
+		float farClip
+	);
 
-// 3x3単位行列
-Matrix3x3 MakeIdentity3x3();
+	// 正射影行列
+	static Matrix4x4 MakeOrthographicMatrix(
+		float left,
+		float top,
+		float right,
+		float bottom,
+		float nearClip,
+		float farClip
+	);
+
+	// ビューポート変換行列
+	static Matrix4x4 MakeViewportMatrix(
+		float left,
+		float top,
+		float width,
+		float height,
+		float minDepth,
+		float maxDepth
+	);
+
+	// ビュー行列
+	static Matrix4x4 MakeViewMatrix(
+		const Vector3& rotate,
+		const Vector3& translate
+	);
+
+	// ==============================
+	// ベクトル変換
+	// ==============================
+
+	static Vector3 Transform(
+		const Vector3& vector,
+		const Matrix4x4& matrix
+	);
+};
