@@ -55,6 +55,9 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 #endif
 
 #include "externals/DirectXTex/DirectXTex.h"
+#include "externals/DirectXTex/d3dx12.h"
+
+#include <vector>
 
 #include <wrl.h>
 //using Microsoft::WRL::ComPtr;
@@ -506,40 +509,83 @@ Microsoft::WRL::ComPtr<ID3D12Resource> CreateTextureResource(ID3D12Device* devic
 	// 2. 利用するHeapの設定
 	// 非常に特殊な運用。 02_04exで一般的なケース版がある
 	D3D12_HEAP_PROPERTIES heapProperties{};
-	heapProperties.Type = D3D12_HEAP_TYPE_CUSTOM; // 細かい設定を行う
-	heapProperties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_WRITE_BACK; // writeBackポリシーでCPUアクセス可能
-	heapProperties.MemoryPoolPreference = D3D12_MEMORY_POOL_L0; // プロセッサの近くに配置
+	heapProperties.Type = D3D12_HEAP_TYPE_DEFAULT;
+
 	// 3. Resource
 	Microsoft::WRL::ComPtr<ID3D12Resource> resource = nullptr;
 	HRESULT hr = device->CreateCommittedResource(
 		&heapProperties, // Heapの設定
 		D3D12_HEAP_FLAG_NONE, // Heapの特殊な設定。特になし。
 		&resourceDesc, // Resourceの設定
-		D3D12_RESOURCE_STATE_GENERIC_READ, //初回のResourceState。Textureは基本読むだけ
+		D3D12_RESOURCE_STATE_COPY_DEST, // データ転送される設定
 		nullptr, // Clear最適値。使わないのでnullptr								
 		IID_PPV_ARGS(&resource)); // 作成するResourceポインタへのポインタ
 	assert(SUCCEEDED(hr));
 	return resource;
 }
 
-void UploadTextureData(ID3D12Resource* texture, const DirectX::ScratchImage& mipImages)
-{
-	// Meta情報を取得
-	const DirectX::TexMetadata& metadata = mipImages.GetMetadata();
-	// 全MipMapについて
-	for (size_t mipLevel = 0; mipLevel < metadata.mipLevels; ++mipLevel) {
-		// MipMapLevelを指定して各Imageを取得
-		const DirectX::Image* ing = mipImages.GetImage(mipLevel, 0, 0); //Texturel
-		HRESULT hr = texture->WriteToSubresource(
-			UINT(mipLevel),
-			nullptr,				// 全領域へコピー
-			ing->pixels,			// 元データアドレス
-			UINT(ing->rowPitch),	// 1ラインサイズ
-			UINT(ing->slicePitch)	// 1枚サイズ
+[[nodiscard]]
+Microsoft::WRL::ComPtr<ID3D12Resource> UploadTextureData(
+	ID3D12Resource* texture,
+	const DirectX::ScratchImage& mipImages,
+	ID3D12Device* device,
+	ID3D12GraphicsCommandList* commandList
+) {
+	// 転送する各MipMapの情報
+	std::vector<D3D12_SUBRESOURCE_DATA> subresources;
+
+	DirectX::PrepareUpload(
+		device,
+		mipImages.GetImages(),
+		mipImages.GetImageCount(),
+		mipImages.GetMetadata(),
+		subresources
+	);
+
+	// 転送用バッファに必要なサイズ
+	uint64_t intermediateSize =
+		GetRequiredIntermediateSize(
+			texture,
+			0,
+			static_cast<UINT>(subresources.size())
 		);
-		assert(SUCCEEDED(hr));
-	}
+
+	// UploadHeap上の転送用リソース
+	Microsoft::WRL::ComPtr<ID3D12Resource> intermediateResource =
+		CreateBufferResource(
+			device,
+			static_cast<size_t>(intermediateSize)
+		);
+
+	// UploadHeapからVRAMのTextureへ転送命令を積む
+	UpdateSubresources(
+		commandList,
+		texture,
+		intermediateResource.Get(),
+		0,
+		0,
+		static_cast<UINT>(subresources.size()),
+		subresources.data()
+	);
+
+	// COPY_DESTからシェーダーで読み込める状態へ変更
+	D3D12_RESOURCE_BARRIER barrier{};
+
+	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+	barrier.Transition.pResource = texture;
+	barrier.Transition.Subresource =
+		D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+	barrier.Transition.StateBefore =
+		D3D12_RESOURCE_STATE_COPY_DEST;
+	barrier.Transition.StateAfter =
+		D3D12_RESOURCE_STATE_GENERIC_READ;
+
+	commandList->ResourceBarrier(1, &barrier);
+
+	return intermediateResource;
 }
+
 
 Microsoft::WRL::ComPtr<ID3D12Resource> CreateDepthStencilTextureResource(
 	ID3D12Device* device,
@@ -1226,7 +1272,12 @@ int WINAPI WinMain(
 	//==============================
 
 	// VertexResourceの生成
-	// ID3D12Resource* vertexResource = CreateBufferResource(device, sizeof(VertexData) * kVertexCount);
+	// 球専用の頂点リソース
+	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceSphere =
+		CreateBufferResource(
+			device.Get(),
+			sizeof(VertexData) * kVertexCount
+		);
 
 	//==============================
 	// ModelData用
@@ -1234,9 +1285,11 @@ int WINAPI WinMain(
 	//モデル読み込み
 	ModelData modelData = LoadObjectFile("resources", "plane.obj");
 	//頂点リソースを作る
-	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResource =
-		CreateBufferResource(device.Get(),
-			sizeof(VertexData) * modelData.vertices.size());
+	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceModel =
+		CreateBufferResource(
+			device.Get(),
+			sizeof(VertexData) * modelData.vertices.size()
+		);
 
 
 
@@ -1320,19 +1373,16 @@ int WINAPI WinMain(
 
 	//VertexBufferViewの作成
 	// 頂点バッファビューを作成する
-	D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewModel{};
 	// リソースの先頭のアドレスから使う
-	vertexBufferView.BufferLocation = vertexResource->GetGPUVirtualAddress();
+	vertexBufferViewModel.BufferLocation = vertexResourceModel->GetGPUVirtualAddress();
 	// 使用するリソースのサイズは頂点のサイズ
 
-	// 球生成
-	// vertexBufferView.SizeInBytes = sizeof(VertexData) * kVertexCount;
-
 	// ModelData
-	vertexBufferView.SizeInBytes = UINT(sizeof(VertexData) * modelData.vertices.size());
+	vertexBufferViewModel.SizeInBytes = UINT(sizeof(VertexData) * modelData.vertices.size());
 
 	// 1頂点あたりのサイズ
-	vertexBufferView.StrideInBytes = sizeof(VertexData);
+	vertexBufferViewModel.StrideInBytes = sizeof(VertexData);
 
 	//indexBufferViewの作成
 	D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
@@ -1343,13 +1393,33 @@ int WINAPI WinMain(
 	//インデックスはuint32_tとする
 	indexBufferViewSprite.Format = DXGI_FORMAT_R32_UINT;
 
+	// ==============================
+	// 球用頂点バッファビュー
+	// ==============================
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewSphere{};
+
+	vertexBufferViewSphere.BufferLocation =
+		vertexResourceSphere->GetGPUVirtualAddress();
+
+	vertexBufferViewSphere.SizeInBytes =
+		sizeof(VertexData) * kVertexCount;
+
+	vertexBufferViewSphere.StrideInBytes =
+		sizeof(VertexData);
+
 	// 頂点データをリソースにコピー
-	VertexData* vertexData = nullptr;
+	VertexData* vertexDataModel = nullptr;
 	//書き込むためのアドレスを取得
-	vertexResource->Map(
+	vertexResourceModel->Map(
 		0,
 		nullptr,
-		reinterpret_cast<void**>(&vertexData)
+		reinterpret_cast<void**>(&vertexDataModel)
+	);
+
+	std::memcpy(
+		vertexDataModel,
+		modelData.vertices.data(),
+		sizeof(VertexData) * modelData.vertices.size()
 	);
 
 	wvpResource->Map(
@@ -1370,11 +1440,21 @@ int WINAPI WinMain(
 	directionalLightData->direction = { 0.0f,-1.0f,0.0f };
 	directionalLightData->intensity = 1.0f;
 
-	//単位行列を書き込んでおく
-	//*wvpData = MakeIdentity4x4();
+	// ==============================
+	// 球頂点データ
+	// ==============================
+	VertexData* vertexDataSphere = nullptr;
+
+	vertexResourceSphere->Map(
+		0,
+		nullptr,
+		reinterpret_cast<void**>(&vertexDataSphere)
+	);
 
 	// 球生成
-	/*
+	// ==============================
+// 球生成
+// ==============================
 	for (uint32_t latIndex = 0;
 		latIndex < kSubdivision;
 		++latIndex)
@@ -1400,104 +1480,94 @@ int WINAPI WinMain(
 				(lonIndex + 1);
 
 			uint32_t start =
-				(latIndex * kSubdivision + lonIndex)
-				* 6;
+				(latIndex * kSubdivision + lonIndex) * 6;
 
 			// a
-			vertexData[start + 0].position = {
+			vertexDataSphere[start + 0].position = {
 				cosf(lat0) * cosf(lon0),
 				sinf(lat0),
 				cosf(lat0) * sinf(lon0),
 				1.0f
 			};
 
-			vertexData[start + 0].texcoord = {
+			vertexDataSphere[start + 0].texcoord = {
 				float(lonIndex) / kSubdivision,
 				1.0f - float(latIndex) / kSubdivision
 			};
 
 			// b
-			vertexData[start + 1].position = {
+			vertexDataSphere[start + 1].position = {
 				cosf(lat1) * cosf(lon0),
 				sinf(lat1),
 				cosf(lat1) * sinf(lon0),
 				1.0f
 			};
 
-			vertexData[start + 1].texcoord = {
+			vertexDataSphere[start + 1].texcoord = {
 				float(lonIndex) / kSubdivision,
 				1.0f - float(latIndex + 1) / kSubdivision
 			};
 
 			// c
-			vertexData[start + 2].position = {
+			vertexDataSphere[start + 2].position = {
 				cosf(lat0) * cosf(lon1),
 				sinf(lat0),
 				cosf(lat0) * sinf(lon1),
 				1.0f
 			};
 
-
-			vertexData[start + 2].texcoord = {
+			vertexDataSphere[start + 2].texcoord = {
 				float(lonIndex + 1) / kSubdivision,
 				1.0f - float(latIndex) / kSubdivision
 			};
 
 			// d
-			vertexData[start + 3].position = {
+			vertexDataSphere[start + 3].position = {
 				cosf(lat0) * cosf(lon1),
 				sinf(lat0),
 				cosf(lat0) * sinf(lon1),
 				1.0f
 			};
 
-			vertexData[start + 3].texcoord = {
+			vertexDataSphere[start + 3].texcoord = {
 				float(lonIndex + 1) / kSubdivision,
 				1.0f - float(latIndex) / kSubdivision
 			};
 
-			vertexData[start + 4].position = {
+			vertexDataSphere[start + 4].position = {
 				cosf(lat1) * cosf(lon0),
 				sinf(lat1),
 				cosf(lat1) * sinf(lon0),
 				1.0f
 			};
 
-			vertexData[start + 4].texcoord = {
+			vertexDataSphere[start + 4].texcoord = {
 				float(lonIndex) / kSubdivision,
 				1.0f - float(latIndex + 1) / kSubdivision
 			};
 
-			vertexData[start + 5].position = {
+			vertexDataSphere[start + 5].position = {
 				cosf(lat1) * cosf(lon1),
 				sinf(lat1),
 				cosf(lat1) * sinf(lon1),
 				1.0f
 			};
 
-			vertexData[start + 5].texcoord = {
+			vertexDataSphere[start + 5].texcoord = {
 				float(lonIndex + 1) / kSubdivision,
 				1.0f - float(latIndex + 1) / kSubdivision
 			};
 
-			// 法線設定
-			for (int i = 0; i < 6; i++) {
-				vertexData[start + i].normal = {
-					vertexData[start + i].position.x,
-					vertexData[start + i].position.y,
-					vertexData[start + i].position.z
+			// 球では位置ベクトルを法線として使用できる
+			for (int32_t i = 0; i < 6; ++i) {
+				vertexDataSphere[start + i].normal = {
+					vertexDataSphere[start + i].position.x,
+					vertexDataSphere[start + i].position.y,
+					vertexDataSphere[start + i].position.z
 				};
 			}
 		}
-
 	}
-	*/
-
-	std::memcpy(
-		vertexData,
-		modelData.vertices.data(),
-		sizeof(VertexData) * modelData.vertices.size()
-	);
 
 	//Sprite用の頂点データ
 	VertexData* vertexDataSprite = nullptr;
@@ -1638,11 +1708,6 @@ int WINAPI WinMain(
 	assert(SUCCEEDED(hr));
 
 
-	// 最初に閉じておく
-	hr = commandList->Close();
-	assert(SUCCEEDED(hr));
-
-
 	// ==============================
 	// スワップチェーン生成
 	// ==============================
@@ -1723,20 +1788,64 @@ int WINAPI WinMain(
 
 
 
-	//Texture読み込み
-	DirectX::ScratchImage mipImages = LoadTexture("resources/uvChecker.png");
-	const DirectX::TexMetadata& metadata = mipImages.GetMetadata();
-	Microsoft::WRL::ComPtr<ID3D12Resource> textureResource = CreateTextureResource(device.Get(), metadata);
-	UploadTextureData(textureResource.Get(), mipImages);
+	// ==============================
+	// Texture読み込み
+	// ==============================
 
-	// 2枚目のTextureを読んで転送する
-	// モンスターボール用
-	//DirectX::ScratchImage mipImages2 = LoadTexture("resources/monsterBall.png");
-	//モデルマテリアル用
-	DirectX::ScratchImage mipImages2 = LoadTexture(modelData.material.textureFilePath);
-	const DirectX::TexMetadata& metadata2 = mipImages2.GetMetadata();
-	Microsoft::WRL::ComPtr<ID3D12Resource> textureResource2 = CreateTextureResource(device.Get(), metadata2);
-	UploadTextureData(textureResource2.Get(), mipImages2);
+	// 1枚目
+	DirectX::ScratchImage mipImages =
+		LoadTexture("resources/uvChecker.png");
+
+	const DirectX::TexMetadata& metadata =
+		mipImages.GetMetadata();
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> textureResource =
+		CreateTextureResource(
+			device.Get(),
+			metadata
+		);
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> intermediateResource =
+		UploadTextureData(
+			textureResource.Get(),
+			mipImages,
+			device.Get(),
+			commandList
+		);
+
+	// 2枚目
+	DirectX::ScratchImage mipImages2 =
+		LoadTexture(modelData.material.textureFilePath);
+
+	const DirectX::TexMetadata& metadata2 =
+		mipImages2.GetMetadata();
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> textureResource2 =
+		CreateTextureResource(
+			device.Get(),
+			metadata2
+		);
+
+	Microsoft::WRL::ComPtr<ID3D12Resource> intermediateResource2 =
+		UploadTextureData(
+			textureResource2.Get(),
+			mipImages2,
+			device.Get(),
+			commandList
+		);
+
+	hr = commandList->Close();
+	assert(SUCCEEDED(hr));
+
+	ID3D12CommandList* commandLists[] = {
+		commandList
+	};
+
+	commandQueue->ExecuteCommandLists(
+		1,
+		commandLists
+	);
+
 
 	// ==========================================
 	// SRV作成
@@ -1893,6 +2002,33 @@ int WINAPI WinMain(
 	io.Fonts->Build();
 #endif
 
+	// ==========================================
+	// 初期テクスチャ転送コマンドを実行
+	// ==========================================
+
+	// GPUへFenceシグナルを送る
+	fenceValue++;
+
+	hr = commandQueue->Signal(
+		fence.Get(),
+		fenceValue
+	);
+	assert(SUCCEEDED(hr));
+
+	// テクスチャ転送の完了を待つ
+	if (fence->GetCompletedValue() < fenceValue) {
+
+		hr = fence->SetEventOnCompletion(
+			fenceValue,
+			fenceEvent
+		);
+		assert(SUCCEEDED(hr));
+
+		WaitForSingleObject(
+			fenceEvent,
+			INFINITE
+		);
+	}
 
 	// ==========================================
 	// XAudio2の初期化
@@ -1939,7 +2075,14 @@ int WINAPI WinMain(
 	};
 
 
-	bool useMonsterBall = false;
+	bool useModelTexture = false;
+
+	// ==============================
+	// 描画ON・OFF
+	// ==============================
+	bool isDrawModel = true;
+	bool isDrawSphere = false;
+	bool isDrawSprite = false;
 
 	//音声読み込み
 	SoundData soundData1 = SoundLoadWave("resources/Alarm01.wav");
@@ -1958,8 +2101,6 @@ int WINAPI WinMain(
 	// ==============================
 	// メインループ
 	// ==============================
-
-
 
 	MSG msg{};
 
@@ -2146,8 +2287,20 @@ int WINAPI WinMain(
 
 			ImGui::Begin("Material");
 
+			// ==============================
+			// 描画設定
+			// ==============================
+			ImGui::SeparatorText("Draw Settings");
+
+			ImGui::Checkbox("Draw Model", &isDrawModel);
+			ImGui::Checkbox("Draw Sphere", &isDrawSphere);
+			ImGui::Checkbox("Draw Sprite", &isDrawSprite);
+
 			ImGui::ColorEdit4("Color", &materialColor.x);
-			ImGui::Checkbox("useMonsterBall", &useMonsterBall);
+			ImGui::Checkbox(
+				"Use Model Texture",
+				&useModelTexture
+			);
 
 			// ===== モデル操作 =====
 			ImGui::Separator();
@@ -2442,7 +2595,7 @@ int WINAPI WinMain(
 			//RootSignatureとPSOに設定してるけど別途設定が必要
 			commandList->SetGraphicsRootSignature(rootSignature.Get()); // RootSignatureの設定
 			commandList->SetPipelineState(graphicsPipelineState); // PSOの設定
-			commandList->IASetVertexBuffers(0, 1, &vertexBufferView);			// 頂点バッファビューの設定
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewModel);			// 頂点バッファビューの設定
 			commandList->IASetIndexBuffer(&indexBufferViewSprite); //IBVを設定
 			//形状を設定。PSOに設定しているものとはまた別。同じものを設定すると考えておけばいい
 			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // トポロジの設定
@@ -2453,31 +2606,119 @@ int WINAPI WinMain(
 			//DirectionalLight用の定数バッファ(CBV)をRootParameter[3]にセットする
 			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
 			//SRVのDescriptorTableの先頭を設定。2はrootParamater[2]である
-			commandList->SetGraphicsRootDescriptorTable(2, useMonsterBall ? textureSrvHandleGPU2 : textureSrvHandleGPU); // SRVの設定。RootParameterのShaderRegisterと合わせること
+			commandList->SetGraphicsRootDescriptorTable(2, useModelTexture ? textureSrvHandleGPU2 : textureSrvHandleGPU); // SRVの設定。RootParameterのShaderRegisterと合わせること
 			//描画！　(DrawCall/ドローコール)。　3頂点で一つのインスタンス。インスタンスについては今後
-			// 球生成
-			// commandList->DrawInstanced(kVertexCount, 1, 0, 0);
+			// ==========================================
+			// 球描画
+			// ==========================================
+			if (isDrawSphere) {
 
-			// ModelData
-			commandList->DrawInstanced(UINT(modelData.vertices.size()), 1, 0, 0);
+				commandList->IASetVertexBuffers(
+					0,
+					1,
+					&vertexBufferViewSphere
+				);
 
-			/*
+				commandList->IASetIndexBuffer(nullptr);
+
+				commandList->SetGraphicsRootConstantBufferView(
+					0,
+					materialResource->GetGPUVirtualAddress()
+				);
+
+				commandList->SetGraphicsRootConstantBufferView(
+					1,
+					wvpResource->GetGPUVirtualAddress()
+				);
+
+				commandList->SetGraphicsRootDescriptorTable(
+					2,
+					textureSrvHandleGPU
+				);
+
+				commandList->DrawInstanced(
+					kVertexCount,
+					1,
+					0,
+					0
+				);
+			}
+
+			// ==========================================
+			// OBJモデル描画
+			// ==========================================
+			if (isDrawModel) {
+
+				commandList->IASetVertexBuffers(
+					0,
+					1,
+					&vertexBufferViewModel
+				);
+
+				commandList->IASetIndexBuffer(nullptr);
+
+				commandList->SetGraphicsRootConstantBufferView(
+					0,
+					materialResource->GetGPUVirtualAddress()
+				);
+
+				commandList->SetGraphicsRootConstantBufferView(
+					1,
+					wvpResource->GetGPUVirtualAddress()
+				);
+
+				commandList->SetGraphicsRootDescriptorTable(
+					2,
+					textureSrvHandleGPU2
+				);
+
+				commandList->DrawInstanced(
+					UINT(modelData.vertices.size()),
+					1,
+					0,
+					0
+				);
+			}
+
 			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
-			//Spriteの描画。変更が必要なものだけ変更する
-			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSprite);			// VBVを設定
-			//TransformationMatrixCBufferの場所を設定
-			commandList->SetGraphicsRootConstantBufferView(
-				0,
-				materialResourceSprite->GetGPUVirtualAddress()
-			);
+			// ==========================================
+			// スプライト描画
+			// ==========================================
+			if (isDrawSprite) {
 
-			commandList->SetGraphicsRootConstantBufferView(
-				1,
-				transformationMatrixResourceSprite->GetGPUVirtualAddress()
-			);
-			//描画
-			commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
-			*/
+				commandList->IASetVertexBuffers(
+					0,
+					1,
+					&vertexBufferViewSprite
+				);
+
+				commandList->IASetIndexBuffer(
+					&indexBufferViewSprite
+				);
+
+				commandList->SetGraphicsRootConstantBufferView(
+					0,
+					materialResourceSprite->GetGPUVirtualAddress()
+				);
+
+				commandList->SetGraphicsRootConstantBufferView(
+					1,
+					transformationMatrixResourceSprite->GetGPUVirtualAddress()
+				);
+
+				commandList->SetGraphicsRootDescriptorTable(
+					2,
+					textureSrvHandleGPU
+				);
+
+				commandList->DrawIndexedInstanced(
+					6,
+					1,
+					0,
+					0,
+					0
+				);
+			}
 
 #ifdef USE_IMGUI
 			// 実際のcommandListのImGuiの描画コマンドを積む
@@ -2543,32 +2784,8 @@ int WINAPI WinMain(
 	// GPU終了待機
 	// ==============================
 
-	fenceValue++;
-
-	hr = commandQueue->Signal(
-		fence.Get(),
-		fenceValue
-	);
-
-	assert(SUCCEEDED(hr));
-
-	if (fence->GetCompletedValue() < fenceValue) {
-
-		hr = fence->SetEventOnCompletion(
-			fenceValue,
-			fenceEvent
-		);
-
-		assert(SUCCEEDED(hr));
-
-		WaitForSingleObject(
-			fenceEvent,
-			INFINITE
-		);
-	}
-
 #ifdef USE_IMGUI
-	// ImGuiの終了処理。 
+	// ImGuiの終了処理。
 	// こういうもの。 初期化と逆順に行う
 	ImGui_ImplDX12_Shutdown();
 	ImGui_ImplWin32_Shutdown();
