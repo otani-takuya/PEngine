@@ -1,18 +1,17 @@
-#include "object3d.hlsli"
+#include "Object3d.hlsli"
 
+// ==============================
+// 座標変換行列
+// ==============================
 cbuffer TransformationMatrix : register(b1)
 {
     float4x4 WVP;
     float4x4 World;
 };
 
-cbuffer Material : register(b0)
-{
-    float4 color;
-    int enableLighting;
-    float4x4 uvTransform;
-};
-
+// ==============================
+// Vertex Shaderへの入力
+// ==============================
 struct VertexShaderInput
 {
     float4 position : POSITION;
@@ -20,17 +19,23 @@ struct VertexShaderInput
     float3 normal : NORMAL0;
 };
 
+// ==============================
+// Vertex Shader
+// ==============================
 VertexShaderOutput main(VertexShaderInput input)
 {
     VertexShaderOutput output;
 
+    // 頂点をクリップ座標へ変換
     output.position = mul(input.position, WVP);
-    
-    float4 transformedUV = mul(float4(input.texcoord, 0.0f, 1.0f), uvTransform);
 
-    output.texcoord = transformedUV.xy;
-    
-    output.normal = normalize(mul(input.normal, (float3x3) World));
+    // UVTransformはPixel Shader側で行うため、
+    // 元のUV座標をそのまま渡す
+    output.texcoord = input.texcoord;
+
+    // 法線をワールド空間へ変換
+    output.normal =
+        normalize(mul(input.normal, (float3x3) World));
 
     return output;
 }
