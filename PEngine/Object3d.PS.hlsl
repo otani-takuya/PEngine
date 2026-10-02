@@ -56,10 +56,15 @@ PixelShaderOutput main(VertexShaderOutput input)
 
     // Textureの色を取得
     float4 textureColor =
-        gTexture.Sample(
-            gSampler,
-            transformedUV.xy
-        );
+    gTexture.Sample(gSampler, input.texcoord);
+
+    // ==============================
+    // Alpha Test
+    // ==============================
+    if (textureColor.a <= 0.5f)
+    {
+        discard;
+    }
 
     // Materialの色とTextureの色を合成
     float4 baseColor = color * textureColor;

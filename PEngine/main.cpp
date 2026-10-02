@@ -1288,7 +1288,7 @@ int WINAPI WinMain(
 
 	HWND hwnd = CreateWindow(
 		wc.lpszClassName,
-		L"CG2",
+		L"CG3",
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT,
 		CW_USEDEFAULT,
@@ -1651,9 +1651,9 @@ int WINAPI WinMain(
 	//すべての色要素を書き込む
 	blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 	blendDesc.RenderTarget[0].BlendEnable = TRUE;
-	blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_SRC_ALPHA;
+	blendDesc.RenderTarget[0].SrcBlend = D3D12_BLEND_ZERO;
 	blendDesc.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
-	blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_INV_SRC_ALPHA;
+	blendDesc.RenderTarget[0].DestBlend = D3D12_BLEND_SRC_COLOR;
 	blendDesc.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
 	blendDesc.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
 	blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
@@ -1779,6 +1779,17 @@ int WINAPI WinMain(
 		);
 
 	// ==============================
+	// Fence読み込み
+	// ==============================
+	ModelData modelDataFence =
+		LoadObjectFile(
+			"resources",
+			"fence.obj"
+		);
+
+	assert(!modelDataFence.vertices.empty());
+
+	// ==============================
 	// MultiMesh読み込み
 	// PlaneとCubeを別々のMeshとして読み込む
 	// ==============================
@@ -1854,6 +1865,16 @@ int WINAPI WinMain(
 			modelDataBunny.vertices.size()
 		);
 
+	// ==============================
+	// Fence用頂点リソース
+	// ==============================
+	Microsoft::WRL::ComPtr<ID3D12Resource>
+		vertexResourceFence =
+		CreateBufferResource(
+			device.Get(),
+			sizeof(VertexData) *
+			modelDataFence.vertices.size()
+		);
 
 	// ==============================
 	// Suzanne用頂点リソース
@@ -2121,6 +2142,22 @@ int WINAPI WinMain(
 	vertexBufferViewBunny.StrideInBytes =
 		sizeof(VertexData);
 
+	// ==============================
+	// Fence用頂点バッファビュー
+	// ==============================
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewFence{};
+
+	vertexBufferViewFence.BufferLocation =
+		vertexResourceFence->GetGPUVirtualAddress();
+
+	vertexBufferViewFence.SizeInBytes =
+		static_cast<UINT>(
+			sizeof(VertexData) *
+			modelDataFence.vertices.size()
+			);
+
+	vertexBufferViewFence.StrideInBytes =
+		sizeof(VertexData);
 
 	// ==============================
 	// Suzanne用頂点バッファビュー
@@ -2195,6 +2232,24 @@ int WINAPI WinMain(
 		modelDataBunny.vertices.size()
 	);
 
+	// ==============================
+	// Fence頂点データをコピー
+	// ==============================
+	VertexData* vertexDataFence = nullptr;
+
+	vertexResourceFence->Map(
+		0,
+		nullptr,
+		reinterpret_cast<void**>(&vertexDataFence)
+	);
+
+	std::memcpy(
+		vertexDataFence,
+		modelDataFence.vertices.data(),
+		sizeof(VertexData)*
+		modelDataFence.vertices.size()
+	);
+
 
 	// ==============================
 	// Suzanne頂点データをコピー
@@ -2261,6 +2316,22 @@ int WINAPI WinMain(
 			)
 	);
 
+	// Fence用WVP
+	Microsoft::WRL::ComPtr<ID3D12Resource>
+		wvpResourceFence =
+		CreateBufferResource(
+			device.Get(),
+			sizeof(TransformationMatrix)
+		);
+
+	TransformationMatrix* wvpDataFence = nullptr;
+
+	wvpResourceFence->Map(
+		0,
+		nullptr,
+		reinterpret_cast<void**>(&wvpDataFence)
+	);
+
 	// Suzanne用WVP
 	wvpResourceSuzanne->Map(
 		0,
@@ -2273,6 +2344,8 @@ int WINAPI WinMain(
 		nullptr,
 		reinterpret_cast<void**>(&directionalLightData)
 	);
+
+
 
 	wvpDataPlane->WVP = Matrix::MakeIdentity4x4();
 	wvpDataPlane->World = Matrix::MakeIdentity4x4();
@@ -2756,6 +2829,33 @@ int WINAPI WinMain(
 		);
 
 	// ==============================
+	// Fence用Texture
+	// ==============================
+	DirectX::ScratchImage mipImagesFence =
+		LoadTexture(
+			modelDataFence.material.textureFilePath
+		);
+
+	const DirectX::TexMetadata& metadataFence =
+		mipImagesFence.GetMetadata();
+
+	Microsoft::WRL::ComPtr<ID3D12Resource>
+		textureResourceFence =
+		CreateTextureResource(
+			device.Get(),
+			metadataFence
+		);
+
+	Microsoft::WRL::ComPtr<ID3D12Resource>
+		intermediateResourceFence =
+		UploadTextureData(
+			textureResourceFence.Get(),
+			mipImagesFence,
+			device.Get(),
+			commandList
+		);
+
+	// ==============================
 	// 5枚目：MultiMaterialのCube用
 	// ==============================
 	DirectX::ScratchImage mipImagesMonsterBall =
@@ -2850,6 +2950,26 @@ int WINAPI WinMain(
 	srvDescBunny.Texture2D.MipLevels =
 		static_cast<UINT>(
 			metadataBunny.mipLevels
+			);
+
+
+	// ==============================
+	// Fence用SRV設定
+	// ==============================
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDescFence{};
+
+	srvDescFence.Format =
+		metadataFence.format;
+
+	srvDescFence.Shader4ComponentMapping =
+		D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+	srvDescFence.ViewDimension =
+		D3D12_SRV_DIMENSION_TEXTURE2D;
+
+	srvDescFence.Texture2D.MipLevels =
+		static_cast<UINT>(
+			metadataFence.mipLevels
 			);
 
 	// ==============================
@@ -2958,6 +3078,25 @@ int WINAPI WinMain(
 			5
 		);
 
+	// ==============================
+	// Fence用SRVハンドル
+	// ==============================
+		D3D12_CPU_DESCRIPTOR_HANDLE
+		textureSrvHandleCPUFence =
+		GetCPUDescriptorHandle(
+			srvDescriptorheap,
+			descriptorSizeSRV,
+			6
+		);
+
+	D3D12_GPU_DESCRIPTOR_HANDLE
+		textureSrvHandleGPUFence =
+		GetGPUDescriptorHandle(
+			srvDescriptorheap,
+			descriptorSizeSRV,
+			6
+		);
+
 	// MaterialごとのSRV番号を設定
 	for (
 		MaterialData& material :
@@ -3010,6 +3149,13 @@ int WINAPI WinMain(
 		textureResourceMonsterBall.Get(),
 		&srvDescMonsterBall,
 		textureSrvHandleCPUMonsterBall
+	);
+
+	// Fence
+	device->CreateShaderResourceView(
+		textureResourceFence.Get(),
+		&srvDescFence,
+		textureSrvHandleCPUFence
 	);
 
 	// ==============================
@@ -3195,6 +3341,15 @@ int WINAPI WinMain(
 		{0.0f, 1.0f, 0.0f}
 	};
 
+	// ==============================
+	// Fence用Transform
+	// ==============================
+	Transform transformFence{
+	{ 1.0f, 1.0f, 1.0f }, // Scale
+	{ 0.0f, 0.0f, 0.0f }, // Rotate
+	{ 0.0f, 0.0f, 0.0f }  // Translate
+	};
+
 
 	// ==============================
 	// MultiMesh用Transform
@@ -3269,6 +3424,7 @@ int WINAPI WinMain(
 	bool isDrawMultiMesh = false;
 	bool isDrawMultiMaterial = false;
 	bool isDrawSuzanne = false;
+	bool isDrawFence = true;
 
 	//音声読み込み
 	SoundData soundData1 = SoundLoadWave("resources/Alarm01.wav");
@@ -3485,6 +3641,7 @@ int WINAPI WinMain(
 			ImGui::Checkbox("Draw Suzanne", &isDrawSuzanne);
 			ImGui::Checkbox("Draw Sphere", &isDrawSphere);
 			ImGui::Checkbox("Draw Sprite", &isDrawSprite);
+			ImGui::Checkbox("Draw Fence", &isDrawFence);
 
 			// ==============================
 			// MultiMesh操作
@@ -3802,6 +3959,34 @@ int WINAPI WinMain(
 				ImGui::SliderAngle(
 					"Suzanne Rotate Z",
 					&transformSuzanne.rotate.z
+				);
+			}
+
+
+			// ==============================
+			// Fence操作
+			// ==============================
+			if (ImGui::CollapsingHeader(
+				"Fence Transform",
+				ImGuiTreeNodeFlags_DefaultOpen
+			)) {
+				ImGui::DragFloat3(
+					"Fence Translate",
+					&transformFence.translate.x,
+					0.01f
+				);
+
+				ImGui::DragFloat3(
+					"Fence Scale",
+					&transformFence.scale.x,
+					0.01f,
+					0.01f,
+					10.0f
+				);
+
+				ImGui::SliderAngle(
+					"Fence Rotate Y",
+					&transformFence.rotate.y
 				);
 			}
 
@@ -4212,6 +4397,8 @@ int WINAPI WinMain(
 				);
 
 
+
+
 			// ==============================
 			// MultiMesh World行列
 			// ==============================
@@ -4370,6 +4557,26 @@ int WINAPI WinMain(
 					worldMatrixSuzanne,
 					viewProjectionMatrix
 				);
+
+			// Fence
+			Matrix4x4 worldMatrixFence =
+				Matrix::MakeAffineMatrix(
+					transformFence.scale,
+					transformFence.rotate,
+					transformFence.translate
+				);
+
+			Matrix4x4 worldViewProjectionMatrixFence =
+				Matrix::Multiply(
+					worldMatrixFence,
+					viewProjectionMatrix
+				);
+
+			wvpDataFence->WVP =
+				worldViewProjectionMatrixFence;
+
+			wvpDataFence->World =
+				worldMatrixFence;
 
 
 			//Sprite用のWorldViewProjectionMatrixを作る
@@ -4581,7 +4788,52 @@ int WINAPI WinMain(
 				);
 			}
 
+			// ==========================================
+			// Fence描画
+			// ==========================================
+			if (isDrawFence) {
 
+				commandList->IASetVertexBuffers(
+					0,
+					1,
+					&vertexBufferViewFence
+				);
+
+				commandList->IASetIndexBuffer(nullptr);
+
+				// Material
+				commandList->SetGraphicsRootConstantBufferView(
+					0,
+					materialResource->GetGPUVirtualAddress()
+				);
+
+				// Fence用WVP
+				commandList->SetGraphicsRootConstantBufferView(
+					1,
+					wvpResourceFence->GetGPUVirtualAddress()
+				);
+
+				// Fence専用Texture
+				commandList->SetGraphicsRootDescriptorTable(
+					2,
+					textureSrvHandleGPUFence
+				);
+
+				// DirectionalLight
+				commandList->SetGraphicsRootConstantBufferView(
+					3,
+					directionalLightResource->GetGPUVirtualAddress()
+				);
+
+				commandList->DrawInstanced(
+					static_cast<UINT>(
+						modelDataFence.vertices.size()
+						),
+					1,
+					0,
+					0
+				);
+			}
 
 			// ==========================================
 			// MultiMesh描画
