@@ -6,24 +6,6 @@
 #include <cstring>
 
 // ==============================
-// 静的メンバ変数
-// ==============================
-
-Microsoft::WRL::ComPtr<IDirectInput8>
-Input::directInput_ = nullptr;
-
-Microsoft::WRL::ComPtr<IDirectInputDevice8>
-Input::keyboard_ = nullptr;
-
-BYTE Input::keys_[256] = {};
-BYTE Input::preKeys_[256] = {};
-
-XINPUT_STATE Input::gamePadState_ = {};
-XINPUT_STATE Input::preGamePadState_ = {};
-
-bool Input::isGamePadConnected_ = false;
-
-// ==============================
 // 初期化
 // ==============================
 void Input::Initialize(

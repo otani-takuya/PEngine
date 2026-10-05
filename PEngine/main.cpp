@@ -1407,9 +1407,6 @@ int WINAPI WinMain(
 
 	assert(adapter != nullptr);
 
-
-	assert(false && "ここでブレークして、GPUのメモリ容量を確認すること");
-
 	// ==============================
 	// DXC初期化
 	// ==============================
@@ -1739,7 +1736,12 @@ int WINAPI WinMain(
 	// 入力処理初期化処理
 	// ==========================================
 
-	Input::Initialize(hInstance, hwnd);
+	Input* input = new Input();
+
+	input->Initialize(
+		hInstance,
+		hwnd
+	);
 
 
 	//==============================
@@ -3487,36 +3489,36 @@ int WINAPI WinMain(
 			// キーボード情報の取得
 			// ==========================================
 
-			Input::Update();
+			input->Update();
 
 			//使い方サンプル
 			//数字の0キーが押されていたら
 			// 押している間
-			if (Input::PushKey(DIK_0)) {
+			if (input->PushKey(DIK_0)) {
 				OutputDebugStringA("Hit 0\n");	//出力ウィンドウに「Hit 0」と表示
 			}
 
 			// 押した瞬間
-			if (Input::TriggerKey(DIK_1)) {
+			if (input->TriggerKey(DIK_1)) {
 				//音声再生
 				SoundPlayWave(xAudio2.Get(), soundData1);
 			}
 
 			// 離した瞬間
-			if (Input::ReleaseKey(DIK_2)) {
+			if (input->ReleaseKey(DIK_2)) {
 				OutputDebugStringA("Hit 2\n");
 			}
 
 
 			// F1：通常カメラとデバッグカメラを切り替え
-			if (Input::TriggerKey(DIK_F1)) {
+			if (input->TriggerKey(DIK_F1)) {
 				isDebugCamera = !isDebugCamera;
 			}
 
 			// F2：デバッグカメラのモード切り替え
 			if (
 				isDebugCamera &&
-				Input::TriggerKey(DIK_F2)
+				input->TriggerKey(DIK_F2)
 				) {
 				debugCamera.ToggleMode();
 			}
@@ -4228,22 +4230,22 @@ int WINAPI WinMain(
 				ImGuiTreeNodeFlags_DefaultOpen
 			)) {
 				const bool isConnected =
-					Input::IsGamePadConnected();
+					input->IsGamePadConnected();
 
 				if (isConnected) {
 					ImGui::Text("Connected : Yes");
 
 					const GamePadStick leftStick =
-						Input::GetLeftStick();
+						input->GetLeftStick();
 
 					const GamePadStick rightStick =
-						Input::GetRightStick();
+						input->GetRightStick();
 
 					const float leftTrigger =
-						Input::GetLeftTrigger();
+						input->GetLeftTrigger();
 
 					const float rightTrigger =
-						Input::GetRightTrigger();
+						input->GetRightTrigger();
 
 					ImGui::Text(
 						"Left Stick  : %.2f, %.2f",
@@ -4271,7 +4273,7 @@ int WINAPI WinMain(
 
 					ImGui::Text(
 						"A : %s",
-						Input::PushButton(
+						input->PushButton(
 							XINPUT_GAMEPAD_A
 						)
 						? "ON"
@@ -4280,7 +4282,7 @@ int WINAPI WinMain(
 
 					ImGui::Text(
 						"B : %s",
-						Input::PushButton(
+						input->PushButton(
 							XINPUT_GAMEPAD_B
 						)
 						? "ON"
@@ -4289,7 +4291,7 @@ int WINAPI WinMain(
 
 					ImGui::Text(
 						"X : %s",
-						Input::PushButton(
+						input->PushButton(
 							XINPUT_GAMEPAD_X
 						)
 						? "ON"
@@ -4298,7 +4300,7 @@ int WINAPI WinMain(
 
 					ImGui::Text(
 						"Y : %s",
-						Input::PushButton(
+						input->PushButton(
 							XINPUT_GAMEPAD_Y
 						)
 						? "ON"
@@ -5239,7 +5241,11 @@ int WINAPI WinMain(
 
 	DestroyWindow(hwnd);
 
-	Input::Finalize();
+	input->Finalize();
+
+	delete input;
+	input = nullptr;
+
 	CoUninitialize();
 
 	return 0;
