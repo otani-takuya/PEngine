@@ -116,6 +116,7 @@ copy "$(windowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxil.dll" "$(TargetDir)dx
     <ClCompile Include="Input.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Matrix.cpp" />
+    <ClCompile Include="ParticleManager.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />
@@ -166,6 +167,8 @@ copy "$(windowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxil.dll" "$(TargetDir)dx
     <ClInclude Include="DebugCamera.h" />
     <ClInclude Include="Input.h" />
     <ClInclude Include="Matrix.h" />
+    <ClInclude Include="ParticleData.h" />
+    <ClInclude Include="ParticleManager.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\externals\imgui\LICENSE.txt" />

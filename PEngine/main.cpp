@@ -30,6 +30,8 @@
 
 #include <numbers>
 
+#include "ParticleManager.h"
+
 // DirectX12
 #include <d3d12.h>
 #include <dxgi1_6.h>
@@ -2243,6 +2245,8 @@ int WINAPI WinMain(
 
 
 
+
+
 	// ==========================================
 	// Suzanne用PipelineState
 	// ==========================================
@@ -2312,89 +2316,6 @@ int WINAPI WinMain(
 	materialDataSprite->lightingType =
 		static_cast<int32_t>(LightingType::kNone);
 	materialDataSprite->uvTransform = Matrix::MakeIdentity4x4();
-
-
-
-	// ==========================================
-	// Particle Instancing用Resource
-	// ==========================================
-
-	// 最大インスタンス数
-	const uint32_t kNumInstance = 10;
-
-	// インスタンス用Resource
-	Microsoft::WRL::ComPtr<ID3D12Resource>
-		instancingResource = CreateBufferResource(
-			device.Get(),
-			sizeof(TransformationMatrix) * kNumInstance
-		);
-
-	assert(instancingResource != nullptr);
-
-	// CPUから書き込むためのポインタ
-	TransformationMatrix* instancingData = nullptr;
-
-	// ResourceをMap
-	hr = instancingResource->Map(
-		0,
-		nullptr,
-		reinterpret_cast<void**>(&instancingData)
-	);
-
-	assert(SUCCEEDED(hr));
-	assert(instancingData != nullptr);
-
-	// ==========================================
-	// 初期化
-	// ==========================================
-
-	for (uint32_t index = 0;
-		index < kNumInstance;
-		++index) {
-
-		instancingData[index].WVP =
-			Matrix::MakeIdentity4x4();
-
-		instancingData[index].World =
-			Matrix::MakeIdentity4x4();
-	}
-
-
-
-	// ==========================================
-	// Particle用Material
-	// ==========================================
-
-	Microsoft::WRL::ComPtr<ID3D12Resource>
-		materialResourceParticle =
-		CreateBufferResource(
-			device.Get(),
-			sizeof(Material)
-		);
-
-	Material* materialDataParticle = nullptr;
-
-	hr = materialResourceParticle->Map(
-		0,
-		nullptr,
-		reinterpret_cast<void**>(&materialDataParticle)
-	);
-
-	assert(SUCCEEDED(hr));
-	assert(materialDataParticle != nullptr);
-
-	// 白色（テクスチャ本来の色を表示）
-	materialDataParticle->color = {
-		1.0f, 1.0f, 1.0f, 1.0f
-	};
-
-	// ライティングなし
-	materialDataParticle->lightingType =
-		static_cast<int32_t>(LightingType::kNone);
-
-	// UVTransformは単位行列
-	materialDataParticle->uvTransform =
-		Matrix::MakeIdentity4x4();
 
 
 
@@ -2592,7 +2513,7 @@ int WINAPI WinMain(
 	std::memcpy(
 		vertexDataFence,
 		modelDataFence.vertices.data(),
-		sizeof(VertexData)*
+		sizeof(VertexData) *
 		modelDataFence.vertices.size()
 	);
 
@@ -3427,7 +3348,7 @@ int WINAPI WinMain(
 	// ==============================
 	// Fence用SRVハンドル
 	// ==============================
-		D3D12_CPU_DESCRIPTOR_HANDLE
+	D3D12_CPU_DESCRIPTOR_HANDLE
 		textureSrvHandleCPUFence =
 		GetCPUDescriptorHandle(
 			srvDescriptorheap,
@@ -3521,71 +3442,6 @@ int WINAPI WinMain(
 	}
 
 
-	// ==========================================
-	// Particle Instancing用SRV
-	// ==========================================
-
-	// SRVのインデックス
-	const uint32_t kInstancingSrvIndex = 7;
-
-	// CPU側DescriptorHandle
-	D3D12_CPU_DESCRIPTOR_HANDLE instancingSrvHandleCPU =
-		GetCPUDescriptorHandle(
-			srvDescriptorheap,
-			descriptorSizeSRV,
-			kInstancingSrvIndex
-		);
-
-	// GPU側DescriptorHandle
-	D3D12_GPU_DESCRIPTOR_HANDLE instancingSrvHandleGPU =
-		GetGPUDescriptorHandle(
-			srvDescriptorheap,
-			descriptorSizeSRV,
-			kInstancingSrvIndex
-		);
-
-	// ==========================================
-	// SRVの設定
-	// ==========================================
-
-	D3D12_SHADER_RESOURCE_VIEW_DESC instancingSrvDesc{};
-
-	// StructuredBufferなのでFormatはUNKNOWN
-	instancingSrvDesc.Format = DXGI_FORMAT_UNKNOWN;
-
-	instancingSrvDesc.Shader4ComponentMapping =
-		D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-
-	// Bufferとして使用
-	instancingSrvDesc.ViewDimension =
-		D3D12_SRV_DIMENSION_BUFFER;
-
-	// 最初の要素
-	instancingSrvDesc.Buffer.FirstElement = 0;
-
-	// インスタンス数
-	instancingSrvDesc.Buffer.NumElements =
-		kNumInstance;
-
-	// 1要素のサイズ
-	instancingSrvDesc.Buffer.StructureByteStride =
-		sizeof(TransformationMatrix);
-
-	// StructuredBufferなのでNONE
-	instancingSrvDesc.Buffer.Flags =
-		D3D12_BUFFER_SRV_FLAG_NONE;
-
-	// ==========================================
-	// SRV生成
-	// ==========================================
-
-	device->CreateShaderResourceView(
-		instancingResource.Get(),
-		&instancingSrvDesc,
-		instancingSrvHandleCPU
-	);
-
-
 	// ==============================
 	// RTV&DSV作成
 	// ==============================
@@ -3627,6 +3483,61 @@ int WINAPI WinMain(
 			dsvHeap,
 			descriptorSizeDSV,
 			0);
+
+
+
+
+	// ==========================================
+	// ParticleManager初期化
+	// ==========================================
+
+	ParticleManager particleManager;
+
+	ParticleManager::InitializeInfo particleInfo{};
+
+	particleInfo.device = device.Get();
+
+	particleInfo.srvHeap = srvDescriptorheap.Get();
+	particleInfo.srvDescriptorSize = descriptorSizeSRV;
+	particleInfo.instancingSrvIndex = 7;
+
+	particleInfo.maxInstanceCount = 1000;
+
+	// DXC
+	particleInfo.dxcUtils = dxcUtils;
+	particleInfo.dxcCompiler = dxcCompiler;
+	particleInfo.includeHandler = dxcIncludeHandler.Get();
+
+	// Shader
+	particleInfo.vertexShaderPath = L"Particle.VS.hlsl";
+	particleInfo.pixelShaderPath = L"Particle.PS.hlsl";
+
+	// 初期化
+	bool particleInitialized =
+		particleManager.Initialize(particleInfo);
+
+	assert(particleInitialized);
+
+	// ==========================================
+	// Particle生成テスト
+	// ==========================================
+
+	// Emitterモードに切り替え
+	particleManager.SetParticleMode(
+		ParticleManager::ParticleMode::kEmitter
+	);
+
+	// Billboardを有効化
+	particleManager.SetBillboardType(
+		ParticleManager::BillboardType::kSpherical
+	);
+
+	// 原点付近から20個生成
+	particleManager.Emit(
+		{ 0.0f, 2.0f, 0.0f },
+		20
+	);
+
 
 
 	// ==============================
@@ -3812,34 +3723,21 @@ int WINAPI WinMain(
 	};
 
 
+
 	// ==========================================
-	// Particle Instancing用Transform
+	// Particle配置設定
 	// ==========================================
 
-	Transform transforms[kNumInstance]{};
+	// 各軸の配置数
+	int particleCountX = 10;
+	int particleCountY = 10;
+	int particleCountZ = 10;
 
-	for (uint32_t index = 0;
-		index < kNumInstance;
-		++index) {
+	// 配置間隔
+	float particleSpacing = 1.0f;
 
-		// 拡大率
-		transforms[index].scale = {
-			1.0f, 1.0f, 1.0f
-		};
-
-		// 回転
-		transforms[index].rotate = {
-			0.0f, 0.0f, 0.0f
-		};
-
-		// 位置
-		transforms[index].translate = {
-			index * 0.8f,
-			index * 0.8f,
-			index * 0.8f
-		};
-	}
-
+	// 拡大率
+	float particleScale = 0.5f;
 
 
 	bool useModelTexture = false;
@@ -3869,6 +3767,48 @@ int WINAPI WinMain(
 	bool isDrawSuzanne = false;
 	bool isDrawFence = true;
 	bool isDrawParticle = true;
+
+	// ==========================================
+	// Billboard設定
+	// ==========================================
+
+	// Billboardの種類
+	// 0: None / 1: Spherical / 2: Cylindrical
+	int billboardType = 1;
+
+	// ==========================================
+	// Particle更新時間
+	// ==========================================
+	const float deltaTime = 1.0f / 60.0f;
+
+	// ==========================================
+	// Particle生成用ImGui変数
+	// ==========================================
+
+	// 1回の生成数
+	int emitCount = 20;
+
+	// 生成位置
+	float emitPosition[3] = {
+		0.0f, 2.0f, 0.0f
+	};
+
+	// 速度の最小値
+	float emitVelocityMin[3] = {
+		-3.0f, 2.0f, -3.0f
+	};
+
+	// 速度の最大値
+	float emitVelocityMax[3] = {
+		3.0f, 5.0f, 3.0f
+	};
+
+	// 重力
+	float emitGravity = -9.8f;
+
+	// 寿命
+	float emitLifeTimeMin = 0.5f;
+	float emitLifeTimeMax = 2.0f;
 
 	//音声読み込み
 	SoundData soundData1 = SoundLoadWave("resources/Alarm01.wav");
@@ -4086,7 +4026,254 @@ int WINAPI WinMain(
 			ImGui::Checkbox("Draw Sphere", &isDrawSphere);
 			ImGui::Checkbox("Draw Sprite", &isDrawSprite);
 			ImGui::Checkbox("Draw Fence", &isDrawFence);
-			ImGui::Checkbox("Draw Particle", &isDrawParticle);
+
+
+
+#ifdef USE_IMGUI
+
+			if (ImGui::CollapsingHeader(
+				"Particle Settings",
+				ImGuiTreeNodeFlags_DefaultOpen
+			)) {
+
+				ImGui::Checkbox(
+					"Draw Particle",
+					&isDrawParticle
+				);
+
+				ImGui::SeparatorText("Grid Count");
+
+				ImGui::SliderInt(
+					"Count X",
+					&particleCountX,
+					1,
+					10
+				);
+
+				ImGui::SliderInt(
+					"Count Y",
+					&particleCountY,
+					1,
+					10
+				);
+
+				ImGui::SliderInt(
+					"Count Z",
+					&particleCountZ,
+					1,
+					10
+				);
+
+				ImGui::SeparatorText("Transform");
+
+				ImGui::DragFloat(
+					"Spacing",
+					&particleSpacing,
+					0.01f,
+					0.1f,
+					5.0f
+				);
+
+				ImGui::DragFloat(
+					"Scale",
+					&particleScale,
+					0.01f,
+					0.01f,
+					3.0f
+				);
+
+				ImGui::SeparatorText("Instance Info");
+
+				ImGui::Text(
+					"Instance Count : %u",
+					particleManager.GetInstanceCount()
+				);
+
+				ImGui::Text(
+					"Max Instance : %u",
+					particleManager.GetMaxInstanceCount()
+				);
+
+
+
+				// ==========================================
+				// Billboard設定
+				// ==========================================
+
+				ImGui::SeparatorText("Billboard");
+
+				// Billboardの種類を選択
+				const char* billboardItems[] = {
+					"None",
+					"Spherical",
+					"Cylindrical"
+				};
+
+				ImGui::Combo(
+					"Billboard Type",
+					&billboardType,
+					billboardItems,
+					IM_ARRAYSIZE(billboardItems)
+				);
+
+
+			}
+
+			ImGui::SeparatorText("Particle Life");
+
+			// 現在生存しているParticle数
+			ImGui::Text(
+				"Alive Particles : %u",
+				particleManager.GetParticleCount()
+			);
+
+			// GPUへ送っているインスタンス数
+			ImGui::Text(
+				"Draw Instances : %u",
+				particleManager.GetInstanceCount()
+			);
+
+
+			// ==========================================
+			// Particle Emitter設定
+			// ==========================================
+			ImGui::SeparatorText("Particle Emitter");
+
+			// 生成数
+			ImGui::SliderInt(
+				"Emit Count",
+				&emitCount,
+				1,
+				100
+			);
+
+			// 生成位置
+			ImGui::DragFloat3(
+				"Emit Position",
+				emitPosition,
+				0.1f
+			);
+
+			// ==========================================
+			// 初速度
+			// ==========================================
+			ImGui::SeparatorText("Velocity");
+
+			ImGui::DragFloat3(
+				"Velocity Min",
+				emitVelocityMin,
+				0.1f
+			);
+
+			ImGui::DragFloat3(
+				"Velocity Max",
+				emitVelocityMax,
+				0.1f
+			);
+
+			// ==========================================
+			// 重力
+			// ==========================================
+			ImGui::SeparatorText("Acceleration");
+
+			ImGui::DragFloat(
+				"Gravity",
+				&emitGravity,
+				0.1f,
+				-30.0f,
+				30.0f
+			);
+
+			// ==========================================
+			// 寿命
+			// ==========================================
+			ImGui::SeparatorText("Life Time");
+
+			ImGui::DragFloat(
+				"Life Time Min",
+				&emitLifeTimeMin,
+				0.1f,
+				0.01f,
+				10.0f
+			);
+
+			ImGui::DragFloat(
+				"Life Time Max",
+				&emitLifeTimeMax,
+				0.1f,
+				0.01f,
+				10.0f
+			);
+
+			// ==========================================
+			// Particle生成設定を反映
+			// ==========================================
+			ParticleManager::EmitSettings settings{};
+
+			settings.velocityMin = {
+				emitVelocityMin[0],
+				emitVelocityMin[1],
+				emitVelocityMin[2]
+			};
+
+			settings.velocityMax = {
+				emitVelocityMax[0],
+				emitVelocityMax[1],
+				emitVelocityMax[2]
+			};
+
+			settings.gravity = emitGravity;
+
+			settings.lifeTimeMin = emitLifeTimeMin;
+			settings.lifeTimeMax = emitLifeTimeMax;
+
+			particleManager.SetEmitSettings(settings);
+
+			// ==========================================
+			// 生成・削除ボタン
+			// ==========================================
+			if (ImGui::Button("Emit Particles")) {
+
+				// Emitterモードへ切り替え
+				particleManager.SetParticleMode(
+					ParticleManager::ParticleMode::kEmitter
+				);
+
+				// Particleを生成
+				particleManager.Emit(
+					{
+						emitPosition[0],
+						emitPosition[1],
+						emitPosition[2]
+					},
+					static_cast<uint32_t>(emitCount)
+				);
+			}
+
+			ImGui::SameLine();
+
+			if (ImGui::Button("Clear Particles")) {
+				particleManager.ClearParticles();
+			}
+
+			// ==========================================
+			// Particle数の表示
+			// ==========================================
+			ImGui::SeparatorText("Particle Info");
+
+			ImGui::Text(
+				"Alive Particles : %u",
+				particleManager.GetParticleCount()
+			);
+
+			ImGui::Text(
+				"Max Particles : %u",
+				particleManager.GetMaxInstanceCount()
+			);
+
+
+#endif
+
 
 			// ==============================
 			// MultiMesh操作
@@ -4920,37 +5107,57 @@ int WINAPI WinMain(
 				);
 
 
+
 			// ==========================================
-			// Particle Instancing用Transform更新
+			// ImGuiの設定をParticleManagerへ反映
 			// ==========================================
 
-			for (uint32_t index = 0;
-				index < kNumInstance;
-				++index) {
+			particleManager.SetGridSettings(
+				static_cast<uint32_t>(particleCountX),
+				static_cast<uint32_t>(particleCountY),
+				static_cast<uint32_t>(particleCountZ),
+				particleSpacing,
+				particleScale
+			);
 
-				// World行列を作成
-				Matrix4x4 worldMatrix =
-					Matrix::MakeAffineMatrix(
-						transforms[index].scale,
-						transforms[index].rotate,
-						transforms[index].translate
-					);
 
-				// WVP行列を作成
-				Matrix4x4 worldViewProjectionMatrix =
-					Matrix::Multiply(
-						worldMatrix,
-						viewProjectionMatrix
-					);
 
-				// GPU用Resourceに書き込む
-				instancingData[index].WVP =
-					worldViewProjectionMatrix;
 
-				instancingData[index].World =
-					worldMatrix;
+			// ==========================================
+			// Billboard設定をParticleManagerへ反映
+			// ==========================================
+
+			switch (billboardType) {
+
+			case 1:
+				particleManager.SetBillboardType(
+					ParticleManager::BillboardType::kSpherical
+				);
+				break;
+
+			case 2:
+				particleManager.SetBillboardType(
+					ParticleManager::BillboardType::kCylindrical
+				);
+				break;
+
+			case 0:
+			default:
+				particleManager.SetBillboardType(
+					ParticleManager::BillboardType::kNone
+				);
+				break;
 			}
 
+
+			// ==========================================
+			// Particle更新
+			// ==========================================
+			particleManager.Update(
+				viewMatrix,
+				projectionMatrix,
+				deltaTime
+			);
 
 			// ==============================
 			// Plane WVP
@@ -5506,79 +5713,22 @@ int WINAPI WinMain(
 
 
 			// ==========================================
-			// Particle Instancing描画
+			// ParticleManagerによる描画
 			// ==========================================
 
-			if (isDrawParticle) {
+			// 描画ON/OFFを設定
+			particleManager.SetVisible(isDrawParticle);
 
-				// Particle専用RootSignature
-				commandList->SetGraphicsRootSignature(
-					rootSignatureParticle.Get()
-				);
+			// Particle描画
+			particleManager.Draw(
+				commandList,
+				vertexBufferViewPlane,
+				static_cast<UINT>(
+					modelDataPlane.vertices.size()
+					),
+				textureSrvHandleGPU
+			);
 
-				// Particle専用PSO
-				commandList->SetPipelineState(
-					graphicsPipelineStateParticle.Get()
-				);
-
-				// 三角形リスト
-				commandList->IASetPrimitiveTopology(
-					D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
-				);
-
-				// Plane用VertexBuffer
-				commandList->IASetVertexBuffers(
-					0,
-					1,
-					&vertexBufferViewPlane
-				);
-
-				// IndexBufferは使用しない
-				commandList->IASetIndexBuffer(nullptr);
-
-				// --------------------------------------
-				// RootParameter[0]
-				// Material CBV : b0 / PixelShader
-				// --------------------------------------
-
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResourceParticle->GetGPUVirtualAddress()
-				);
-
-				// --------------------------------------
-				// RootParameter[1]
-				// Instancing SRV : t0 / VertexShader
-				// --------------------------------------
-
-				commandList->SetGraphicsRootDescriptorTable(
-					1,
-					instancingSrvHandleGPU
-				);
-
-				// --------------------------------------
-				// RootParameter[2]
-				// Texture SRV : t0 / PixelShader
-				// --------------------------------------
-
-				commandList->SetGraphicsRootDescriptorTable(
-					2,
-					textureSrvHandleGPU
-				);
-
-				// --------------------------------------
-				// Instancing描画
-				// --------------------------------------
-
-				commandList->DrawInstanced(
-					static_cast<UINT>(
-						modelDataPlane.vertices.size()
-						),
-					kNumInstance,
-					0,
-					0
-				);
-			}
 
 
 			// ==========================================
