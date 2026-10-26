@@ -1,5 +1,4 @@
 #include "WinApp.h"
-
 #include <cassert>
 
 #ifdef USE_IMGUI
@@ -60,8 +59,6 @@ void WinApp::Initialize() {
 		nullptr,
 		nullptr,
 		wc_.hInstance,
-
-		// WindowProcへWinApp自身を渡す
 		this
 	);
 
@@ -87,7 +84,22 @@ void WinApp::Finalize() {
 
 bool WinApp::ProcessMessage() {
 
+	// ==============================
+	// メッセージ処理状態を初期化
+	// ==============================
+
+	hasProcessedMessage_ = false;
+
+	// すでに終了要求を受け取っている
+	if (isQuitRequested_) {
+		return false;
+	}
+
 	MSG msg{};
+
+	// ==============================
+	// Windowsメッセージ取得
+	// ==============================
 
 	if (PeekMessage(
 		&msg,
@@ -97,12 +109,21 @@ bool WinApp::ProcessMessage() {
 		PM_REMOVE
 	)) {
 
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
+		hasProcessedMessage_ = true;
 
+		// 終了メッセージ
 		if (msg.message == WM_QUIT) {
+
+			isQuitRequested_ = true;
+
 			return false;
 		}
+
+		// キーボードメッセージ変換
+		TranslateMessage(&msg);
+
+		// WindowProcへメッセージを渡す
+		DispatchMessage(&msg);
 	}
 
 	return true;
@@ -116,16 +137,14 @@ LRESULT CALLBACK WinApp::WindowProc(
 	LPARAM lparam
 ) {
 
-	// ==============================
-	// WinAppインスタンス取得
-	// ==============================
-
 	WinApp* winApp = nullptr;
+
+	// ==============================
+	// WinApp自身のポインタを取得
+	// ==============================
 
 	if (msg == WM_NCCREATE) {
 
-		// CreateWindowの最後の引数から
-		// WinAppのポインタを取得
 		CREATESTRUCT* createStruct =
 			reinterpret_cast<CREATESTRUCT*>(lparam);
 
@@ -134,7 +153,6 @@ LRESULT CALLBACK WinApp::WindowProc(
 				createStruct->lpCreateParams
 				);
 
-		// HWNDにWinAppのポインタを保存
 		SetWindowLongPtr(
 			hwnd,
 			GWLP_USERDATA,
@@ -144,7 +162,6 @@ LRESULT CALLBACK WinApp::WindowProc(
 	}
 	else {
 
-		// 保存しておいたWinAppのポインタを取得
 		winApp =
 			reinterpret_cast<WinApp*>(
 				GetWindowLongPtr(
@@ -157,7 +174,6 @@ LRESULT CALLBACK WinApp::WindowProc(
 
 #ifdef USE_IMGUI
 
-	// ImGuiへWindowsメッセージを渡す
 	if (ImGui_ImplWin32_WndProcHandler(
 		hwnd,
 		msg,
@@ -169,10 +185,6 @@ LRESULT CALLBACK WinApp::WindowProc(
 
 #endif
 
-
-	// ==============================
-	// Windowsメッセージ処理
-	// ==============================
 
 	switch (msg) {
 

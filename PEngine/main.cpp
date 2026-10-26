@@ -66,6 +66,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 //using Microsoft::WRL::ComPtr;
 
 #include "Input.h"
+#include "WinApp.h"
 
 DebugCamera* gDebugCamera = nullptr;
 
@@ -285,55 +286,6 @@ std::string ConvertString(const std::wstring& str) {
 
 	return result;
 }
-
-
-
-
-// ==============================
-// ウィンドウプロシージャ
-// ==============================
-
-LRESULT CALLBACK WindowProc(
-	HWND hwnd,
-	UINT msg,
-	WPARAM wparam,
-	LPARAM lparam
-) {
-
-#ifdef USE_IMGUI
-	// ImGuiへイベントを渡す
-	if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wparam, lparam)) {
-		return true;
-	}
-#endif
-
-	switch (msg) {
-
-	case WM_MOUSEWHEEL:
-
-		if (gDebugCamera != nullptr) {
-
-			const short wheel =
-				GET_WHEEL_DELTA_WPARAM(wparam);
-
-			gDebugCamera->AddWheelDelta(
-				static_cast<float>(wheel) /
-				static_cast<float>(WHEEL_DELTA)
-			);
-		}
-
-		return 0;
-
-
-	case WM_DESTROY:
-
-		PostQuitMessage(0);
-		return 0;
-	}
-
-	return DefWindowProc(hwnd, msg, wparam, lparam);
-}
-
 
 // ==============================
 // クラッシュダンプ出力
@@ -1270,41 +1222,14 @@ int WINAPI WinMain(
 	// ウィンドウ作成
 	// ==============================
 
-	WNDCLASS wc{};
+	// WinAppのインスタンスを生成
+	WinApp winApp;
 
-	wc.lpfnWndProc = WindowProc;
-	wc.lpszClassName = L"CG2WindowClass";
-	wc.hInstance = GetModuleHandle(nullptr);
-	wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+	// ウィンドウ初期化
+	winApp.Initialize();
 
-	RegisterClass(&wc);
-
-	RECT wrc = { 0,0,kClientWidth,kClientHeight };
-
-	AdjustWindowRect(
-		&wrc,
-		WS_OVERLAPPEDWINDOW,
-		FALSE
-	);
-
-	HWND hwnd = CreateWindow(
-		wc.lpszClassName,
-		L"CG3",
-		WS_OVERLAPPEDWINDOW,
-		CW_USEDEFAULT,
-		CW_USEDEFAULT,
-		wrc.right - wrc.left,
-		wrc.bottom - wrc.top,
-		nullptr,
-		nullptr,
-		wc.hInstance,
-		nullptr
-	);
-
-	assert(hwnd != nullptr);
-
-	ShowWindow(hwnd, SW_SHOW);
-
+	// DirectX12やImGuiで使用するHWNDを取得
+	HWND hwnd = winApp.GetHwnd();
 
 	// ==============================
 	// DirectX Debug Layer
@@ -2252,7 +2177,7 @@ int WINAPI WinMain(
 	std::memcpy(
 		vertexDataFence,
 		modelDataFence.vertices.data(),
-		sizeof(VertexData)*
+		sizeof(VertexData) *
 		modelDataFence.vertices.size()
 	);
 
@@ -3087,7 +3012,7 @@ int WINAPI WinMain(
 	// ==============================
 	// Fence用SRVハンドル
 	// ==============================
-		D3D12_CPU_DESCRIPTOR_HANDLE
+	D3D12_CPU_DESCRIPTOR_HANDLE
 		textureSrvHandleCPUFence =
 		GetCPUDescriptorHandle(
 			srvDescriptorheap,
@@ -3449,749 +3374,666 @@ int WINAPI WinMain(
 	// メインループ
 	// ==============================
 
-	MSG msg{};
+	while (winApp.ProcessMessage()) {
 
-	while (msg.message != WM_QUIT) {
+		// ==============================
+		// Windowsメッセージ処理
+		// ==============================
 
-		if (PeekMessage(
-			&msg,
-			nullptr,
+		// Windowsメッセージを処理した場合は
+		// 今回のゲーム更新・描画をスキップする
+		if (winApp.HasProcessedMessage()) {
+			continue;
+		}
+
+
+		// ==========================================
+		// GPU待機
+		// ==========================================
+
+		if (fence->GetCompletedValue() < fenceValue) {
+
+			hr = fence->SetEventOnCompletion(
+				fenceValue,
+				fenceEvent
+			);
+
+			assert(SUCCEEDED(hr));
+
+			WaitForSingleObject(
+				fenceEvent,
+				INFINITE
+			);
+		}
+
+		// ==========================================
+		// キーボード情報の取得
+		// ==========================================
+
+		input->Update();
+
+		//使い方サンプル
+		//数字の0キーが押されていたら
+		// 押している間
+		if (input->PushKey(DIK_0)) {
+			OutputDebugStringA("Hit 0\n");	//出力ウィンドウに「Hit 0」と表示
+		}
+
+		// 押した瞬間
+		if (input->TriggerKey(DIK_1)) {
+			//音声再生
+			SoundPlayWave(xAudio2.Get(), soundData1);
+		}
+
+		// 離した瞬間
+		if (input->ReleaseKey(DIK_2)) {
+			OutputDebugStringA("Hit 2\n");
+		}
+
+		// ==============================
+		// マウスホイール入力
+		// ==============================
+
+		// WinAppからホイール移動量を取得
+		const float wheelDelta = winApp.GetWheelDelta();
+
+		// DebugCameraへホイール入力を渡す
+		if (wheelDelta != 0.0f) {
+			debugCamera.AddWheelDelta(wheelDelta);
+		}
+
+		// 次の入力に備えてリセット
+		winApp.ResetWheelDelta();
+
+
+		// F1：通常カメラとデバッグカメラを切り替え
+		if (input->TriggerKey(DIK_F1)) {
+			isDebugCamera = !isDebugCamera;
+		}
+
+		// F2：デバッグカメラのモード切り替え
+		if (
+			isDebugCamera &&
+			input->TriggerKey(DIK_F2)
+			) {
+			debugCamera.ToggleMode();
+		}
+
+		// デバッグカメラ中だけ更新
+		if (isDebugCamera) {
+			debugCamera.Update();
+		}
+
+		// ==========================================
+		// Reset
+		// ==========================================
+
+		hr = commandAllocator->Reset();
+		assert(SUCCEEDED(hr));
+
+		hr = commandList->Reset(
+			commandAllocator,
+			nullptr
+		);
+
+		assert(SUCCEEDED(hr));
+
+
+		// ==========================================
+		// バックバッファ取得
+		// ==========================================
+
+		UINT backBufferIndex =
+			swapChain->GetCurrentBackBufferIndex();
+
+		// ==========================================
+		// PRESENT → RENDER_TARGET
+		// ==========================================
+
+		D3D12_RESOURCE_BARRIER barrier{};
+
+		barrier.Type =
+			D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+
+		barrier.Flags =
+			D3D12_RESOURCE_BARRIER_FLAG_NONE;
+
+		barrier.Transition.pResource =
+			backBuffers[backBufferIndex].Get();
+
+		barrier.Transition.StateBefore =
+			D3D12_RESOURCE_STATE_PRESENT;
+
+		barrier.Transition.StateAfter =
+			D3D12_RESOURCE_STATE_RENDER_TARGET;
+
+		barrier.Transition.Subresource =
+			D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+
+		commandList->ResourceBarrier(1, &barrier);
+
+
+
+		// ==========================================
+		// 描画先設定
+		// ==========================================
+
+		commandList->OMSetRenderTargets(
+			1,
+			&rtvHandles[backBufferIndex],
+			false,
+			&dsvHandle
+		);
+
+		commandList->ClearDepthStencilView(
+			dsvHandle,
+			D3D12_CLEAR_FLAG_DEPTH,
+			1.0f,
 			0,
 			0,
-			PM_REMOVE
+			nullptr
+		);
+
+		// ==========================================
+		// 画面クリア
+		// ==========================================
+
+		float clearColor[] = {
+			0.1f,
+			0.25f,
+			0.5f,
+			1.0f
+		};
+
+		commandList->ClearRenderTargetView(
+			rtvHandles[backBufferIndex],
+			clearColor,
+			0,
+			nullptr
+		);
+
+		// 描画用のDescriptor Heap の設定
+		ID3D12DescriptorHeap* descriptorHeaps[] = {
+			srvDescriptorheap.Get()
+		};
+
+		commandList->SetDescriptorHeaps(1, descriptorHeaps);
+
+
+		// ==========================================
+		// ImGui開始
+		// ==========================================
+#ifdef USE_IMGUI
+		ImGui_ImplDX12_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
+
+		ImGui::Begin("Material");
+
+		// ==============================
+		// 描画設定
+		// ==============================
+		ImGui::SeparatorText("Draw Settings");
+
+		ImGui::Checkbox("Draw Plane", &isDrawPlane);
+		ImGui::Checkbox("Draw Utah Teapot", &isDrawTeapot);
+		ImGui::Checkbox("Draw Stanford Bunny", &isDrawBunny);
+		ImGui::Checkbox("Draw MultiMesh", &isDrawMultiMesh);
+		ImGui::Checkbox("Draw MultiMaterial", &isDrawMultiMaterial);
+		ImGui::Checkbox("Draw Suzanne", &isDrawSuzanne);
+		ImGui::Checkbox("Draw Sphere", &isDrawSphere);
+		ImGui::Checkbox("Draw Sprite", &isDrawSprite);
+		ImGui::Checkbox("Draw Fence", &isDrawFence);
+
+		// ==============================
+		// MultiMesh操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"MultiMesh Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
+			ImGui::Text(
+				"Mesh Count : %d",
+				static_cast<int>(
+					modelDataMultiMesh.meshes.size()
+					)
+			);
+
+			for (
+				const MeshData& mesh :
+				modelDataMultiMesh.meshes
+				) {
+				ImGui::BulletText(
+					"%s : %d vertices",
+					mesh.name.c_str(),
+					static_cast<int>(
+						mesh.vertices.size()
+						)
+				);
+			}
+
+			ImGui::DragFloat3(
+				"MultiMesh Translate",
+				&transformMultiMesh.translate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"MultiMesh Scale",
+				&transformMultiMesh.scale.x,
+				0.01f,
+				0.01f,
+				10.0f
+			);
+
+			ImGui::SliderAngle(
+				"MultiMesh Rotate X",
+				&transformMultiMesh.rotate.x
+			);
+
+			ImGui::SliderAngle(
+				"MultiMesh Rotate Y",
+				&transformMultiMesh.rotate.y
+			);
+
+			ImGui::SliderAngle(
+				"MultiMesh Rotate Z",
+				&transformMultiMesh.rotate.z
+			);
+		}
+
+		// ==============================
+		// MultiMaterial操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"MultiMaterial Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
+			ImGui::Text(
+				"Mesh Count : %d",
+				static_cast<int>(
+					modelDataMultiMaterial.meshes.size()
+					)
+			);
+
+			for (
+				const MeshData& mesh :
+				modelDataMultiMaterial.meshes
+				) {
+				const MaterialData& material =
+					modelDataMultiMaterial.materials[
+						mesh.materialIndex
+					];
+
+				ImGui::BulletText(
+					"%s / %s / %s",
+					mesh.name.c_str(),
+					material.name.c_str(),
+					material.textureFilePath.c_str()
+				);
+			}
+
+			ImGui::DragFloat3(
+				"MultiMaterial Translate",
+				&transformMultiMaterial.translate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"MultiMaterial Scale",
+				&transformMultiMaterial.scale.x,
+				0.01f,
+				0.01f,
+				10.0f
+			);
+
+			ImGui::SliderAngle(
+				"MultiMaterial Rotate X",
+				&transformMultiMaterial.rotate.x
+			);
+
+			ImGui::SliderAngle(
+				"MultiMaterial Rotate Y",
+				&transformMultiMaterial.rotate.y
+			);
+
+			ImGui::SliderAngle(
+				"MultiMaterial Rotate Z",
+				&transformMultiMaterial.rotate.z
+			);
+		}
+
+		ImGui::ColorEdit4("Color", &materialColor.x);
+		ImGui::Checkbox(
+			"Use Model Texture",
+			&useModelTexture
+		);
+
+		// ==============================
+		// OBJモデル操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"Plane Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
 		)) {
 
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
+			ImGui::DragFloat3(
+				"Plane Translate",
+				&transformPlane.translate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"Plane Scale",
+				&transformPlane.scale.x,
+				0.01f,
+				0.01f,
+				10.0f
+			);
+
+			ImGui::SliderAngle(
+				"Plane Rotate X",
+				&transformPlane.rotate.x
+			);
+
+			ImGui::SliderAngle(
+				"Plane Rotate Y",
+				&transformPlane.rotate.y
+			);
+
+			ImGui::SliderAngle(
+				"Plane Rotate Z",
+				&transformPlane.rotate.z
+			);
 		}
-		else {
 
-			// ==========================================
-			// GPU待機
-			// ==========================================
+		// ==============================
+		// Sphere操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"Sphere Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
 
-			if (fence->GetCompletedValue() < fenceValue) {
-
-				hr = fence->SetEventOnCompletion(
-					fenceValue,
-					fenceEvent
-				);
-
-				assert(SUCCEEDED(hr));
-
-				WaitForSingleObject(
-					fenceEvent,
-					INFINITE
-				);
-			}
-
-			// ==========================================
-			// キーボード情報の取得
-			// ==========================================
-
-			input->Update();
-
-			//使い方サンプル
-			//数字の0キーが押されていたら
-			// 押している間
-			if (input->PushKey(DIK_0)) {
-				OutputDebugStringA("Hit 0\n");	//出力ウィンドウに「Hit 0」と表示
-			}
-
-			// 押した瞬間
-			if (input->TriggerKey(DIK_1)) {
-				//音声再生
-				SoundPlayWave(xAudio2.Get(), soundData1);
-			}
-
-			// 離した瞬間
-			if (input->ReleaseKey(DIK_2)) {
-				OutputDebugStringA("Hit 2\n");
-			}
-
-
-			// F1：通常カメラとデバッグカメラを切り替え
-			if (input->TriggerKey(DIK_F1)) {
-				isDebugCamera = !isDebugCamera;
-			}
-
-			// F2：デバッグカメラのモード切り替え
-			if (
-				isDebugCamera &&
-				input->TriggerKey(DIK_F2)
-				) {
-				debugCamera.ToggleMode();
-			}
-
-			// デバッグカメラ中だけ更新
-			if (isDebugCamera) {
-				debugCamera.Update();
-			}
-
-			// ==========================================
-			// Reset
-			// ==========================================
-
-			hr = commandAllocator->Reset();
-			assert(SUCCEEDED(hr));
-
-			hr = commandList->Reset(
-				commandAllocator,
-				nullptr
+			ImGui::DragFloat3(
+				"Sphere Translate",
+				&transformSphere.translate.x,
+				0.01f
 			);
 
-			assert(SUCCEEDED(hr));
-
-
-			// ==========================================
-			// バックバッファ取得
-			// ==========================================
-
-			UINT backBufferIndex =
-				swapChain->GetCurrentBackBufferIndex();
-
-			// ==========================================
-			// PRESENT → RENDER_TARGET
-			// ==========================================
-
-			D3D12_RESOURCE_BARRIER barrier{};
-
-			barrier.Type =
-				D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-
-			barrier.Flags =
-				D3D12_RESOURCE_BARRIER_FLAG_NONE;
-
-			barrier.Transition.pResource =
-				backBuffers[backBufferIndex].Get();
-
-			barrier.Transition.StateBefore =
-				D3D12_RESOURCE_STATE_PRESENT;
-
-			barrier.Transition.StateAfter =
-				D3D12_RESOURCE_STATE_RENDER_TARGET;
-
-			barrier.Transition.Subresource =
-				D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-
-			commandList->ResourceBarrier(1, &barrier);
-
-
-
-			// ==========================================
-			// 描画先設定
-			// ==========================================
-
-			commandList->OMSetRenderTargets(
-				1,
-				&rtvHandles[backBufferIndex],
-				false,
-				&dsvHandle
+			ImGui::DragFloat3(
+				"Sphere Scale",
+				&transformSphere.scale.x,
+				0.01f,
+				0.01f,
+				10.0f
 			);
 
-			commandList->ClearDepthStencilView(
-				dsvHandle,
-				D3D12_CLEAR_FLAG_DEPTH,
-				1.0f,
-				0,
-				0,
-				nullptr
+			ImGui::SliderAngle(
+				"Sphere Rotate X",
+				&transformSphere.rotate.x
 			);
 
-			// ==========================================
-			// 画面クリア
-			// ==========================================
+			ImGui::SliderAngle(
+				"Sphere Rotate Y",
+				&transformSphere.rotate.y
+			);
 
-			float clearColor[] = {
-				0.1f,
-				0.25f,
-				0.5f,
+			ImGui::SliderAngle(
+				"Sphere Rotate Z",
+				&transformSphere.rotate.z
+			);
+		}
+
+		// ==============================
+		// Utah Teapot操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"Utah Teapot Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
+			ImGui::DragFloat3(
+				"Teapot Translate",
+				&transformTeapot.translate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"Teapot Scale",
+				&transformTeapot.scale.x,
+				0.01f,
+				0.001f,
+				10.0f
+			);
+
+			ImGui::SliderAngle(
+				"Teapot Rotate X",
+				&transformTeapot.rotate.x
+			);
+
+			ImGui::SliderAngle(
+				"Teapot Rotate Y",
+				&transformTeapot.rotate.y
+			);
+
+			ImGui::SliderAngle(
+				"Teapot Rotate Z",
+				&transformTeapot.rotate.z
+			);
+		}
+
+
+		// ==============================
+		// Stanford Bunny用 操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"Stanford Bunny Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
+
+			ImGui::DragFloat3(
+				"Bunny Translate",
+				&transformBunny.translate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"Bunny Scale",
+				&transformBunny.scale.x,
+				0.01f,
+				0.001f,
+				100.0f
+			);
+
+			ImGui::SliderAngle(
+				"Bunny Rotate X",
+				&transformBunny.rotate.x
+			);
+
+			ImGui::SliderAngle(
+				"Bunny Rotate Y",
+				&transformBunny.rotate.y
+			);
+
+			ImGui::SliderAngle(
+				"Bunny Rotate Z",
+				&transformBunny.rotate.z
+			);
+		}
+
+
+		// ==============================
+		// Suzanne操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"Suzanne Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
+			ImGui::ColorEdit4(
+				"Suzanne Color",
+				&suzanneColor.x
+			);
+
+			ImGui::DragFloat3(
+				"Suzanne Translate",
+				&transformSuzanne.translate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"Suzanne Scale",
+				&transformSuzanne.scale.x,
+				0.01f,
+				0.01f,
+				10.0f
+			);
+
+			ImGui::SliderAngle(
+				"Suzanne Rotate X",
+				&transformSuzanne.rotate.x
+			);
+
+			ImGui::SliderAngle(
+				"Suzanne Rotate Y",
+				&transformSuzanne.rotate.y
+			);
+
+			ImGui::SliderAngle(
+				"Suzanne Rotate Z",
+				&transformSuzanne.rotate.z
+			);
+		}
+
+
+		// ==============================
+		// Fence操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"Fence Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
+			ImGui::DragFloat3(
+				"Fence Translate",
+				&transformFence.translate.x,
+				0.01f
+			);
+
+			ImGui::DragFloat3(
+				"Fence Scale",
+				&transformFence.scale.x,
+				0.01f,
+				0.01f,
+				10.0f
+			);
+
+			ImGui::SliderAngle(
+				"Fence Rotate Y",
+				&transformFence.rotate.y
+			);
+		}
+
+		// ===== ライト操作 =====
+		ImGui::Separator();
+		ImGui::SeparatorText("Lighting");
+
+		ImGui::Combo(
+			"Lighting Type",
+			&lightingType,
+			lightingTypeNames,
+			IM_ARRAYSIZE(lightingTypeNames)
+		);
+
+		// 色
+		ImGui::ColorEdit4("Light Color", &directionalLightData->color.x);
+
+		// 向き（重要）
+		ImGui::DragFloat3("Light Direction", &directionalLightData->direction.x, 0.01f);
+
+		// 強さ
+		ImGui::DragFloat("Intensity", &directionalLightData->intensity, 0.01f, 0.0f, 10.0f);
+
+
+		// ===== uvTransform操作 =====
+		ImGui::Separator();
+		ImGui::Text("uvTransform Sprite");
+		// ==============================
+		// Sprite本体の操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"Sprite Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
+			ImGui::DragFloat3(
+				"Sprite Translate",
+				&transformSprite.translate.x,
 				1.0f
+			);
+
+			ImGui::DragFloat3(
+				"Sprite Scale",
+				&transformSprite.scale.x,
+				0.01f,
+				0.01f,
+				10.0f
+			);
+
+			ImGui::SliderAngle(
+				"Sprite Rotate Z",
+				&transformSprite.rotate.z
+			);
+		}
+
+		ImGui::DragFloat2("uvTransform Translate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
+		ImGui::DragFloat2("uvTransform Scale", &uvTransformSprite.scale.x, 0.01f, 0.0f, 10.0f);
+		ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
+
+		// ===== デバッグカメラ操作 =====
+		ImGui::Separator();
+		ImGui::Text("Debug Camera");
+
+		// 通常カメラとデバッグカメラ切り替え
+		ImGui::Checkbox("Use Debug Camera", &isDebugCamera);
+
+		if (isDebugCamera) {
+
+			int cameraMode =
+				static_cast<int>(
+					debugCamera.GetMode()
+					);
+
+			const char* modeNames[] = {
+				"Orbit",
+				"Free"
 			};
 
-			commandList->ClearRenderTargetView(
-				rtvHandles[backBufferIndex],
-				clearColor,
-				0,
-				nullptr
-			);
-
-			// 描画用のDescriptor Heap の設定
-			ID3D12DescriptorHeap* descriptorHeaps[] = {
-				srvDescriptorheap.Get()
-			};
-
-			commandList->SetDescriptorHeaps(1, descriptorHeaps);
-
-
-			// ==========================================
-			// ImGui開始
-			// ==========================================
-#ifdef USE_IMGUI
-			ImGui_ImplDX12_NewFrame();
-			ImGui_ImplWin32_NewFrame();
-			ImGui::NewFrame();
-
-			ImGui::Begin("Material");
-
-			// ==============================
-			// 描画設定
-			// ==============================
-			ImGui::SeparatorText("Draw Settings");
-
-			ImGui::Checkbox("Draw Plane", &isDrawPlane);
-			ImGui::Checkbox("Draw Utah Teapot", &isDrawTeapot);
-			ImGui::Checkbox("Draw Stanford Bunny", &isDrawBunny);
-			ImGui::Checkbox("Draw MultiMesh", &isDrawMultiMesh);
-			ImGui::Checkbox("Draw MultiMaterial", &isDrawMultiMaterial);
-			ImGui::Checkbox("Draw Suzanne", &isDrawSuzanne);
-			ImGui::Checkbox("Draw Sphere", &isDrawSphere);
-			ImGui::Checkbox("Draw Sprite", &isDrawSprite);
-			ImGui::Checkbox("Draw Fence", &isDrawFence);
-
-			// ==============================
-			// MultiMesh操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"MultiMesh Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
+			if (ImGui::Combo(
+				"Camera Mode",
+				&cameraMode,
+				modeNames,
+				IM_ARRAYSIZE(modeNames)
 			)) {
-				ImGui::Text(
-					"Mesh Count : %d",
-					static_cast<int>(
-						modelDataMultiMesh.meshes.size()
+				debugCamera.SetMode(
+					static_cast<DebugCamera::Mode>(
+						cameraMode
 						)
 				);
+			}
 
-				for (
-					const MeshData& mesh :
-					modelDataMultiMesh.meshes
-					) {
-					ImGui::BulletText(
-						"%s : %d vertices",
-						mesh.name.c_str(),
-						static_cast<int>(
-							mesh.vertices.size()
-							)
-					);
-				}
+			if (
+				debugCamera.GetMode() ==
+				DebugCamera::Mode::kOrbit
+				) {
 
+				ImGui::Text("Orbit Camera");
+
+				// 注目点
 				ImGui::DragFloat3(
-					"MultiMesh Translate",
-					&transformMultiMesh.translate.x,
+					"Camera Target",
+					&debugCamera.GetTarget().x,
 					0.01f
 				);
 
-				ImGui::DragFloat3(
-					"MultiMesh Scale",
-					&transformMultiMesh.scale.x,
-					0.01f,
-					0.01f,
-					10.0f
-				);
-
-				ImGui::SliderAngle(
-					"MultiMesh Rotate X",
-					&transformMultiMesh.rotate.x
-				);
-
-				ImGui::SliderAngle(
-					"MultiMesh Rotate Y",
-					&transformMultiMesh.rotate.y
-				);
-
-				ImGui::SliderAngle(
-					"MultiMesh Rotate Z",
-					&transformMultiMesh.rotate.z
-				);
-			}
-
-			// ==============================
-			// MultiMaterial操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"MultiMaterial Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-				ImGui::Text(
-					"Mesh Count : %d",
-					static_cast<int>(
-						modelDataMultiMaterial.meshes.size()
-						)
-				);
-
-				for (
-					const MeshData& mesh :
-					modelDataMultiMaterial.meshes
-					) {
-					const MaterialData& material =
-						modelDataMultiMaterial.materials[
-							mesh.materialIndex
-						];
-
-					ImGui::BulletText(
-						"%s / %s / %s",
-						mesh.name.c_str(),
-						material.name.c_str(),
-						material.textureFilePath.c_str()
-					);
-				}
-
-				ImGui::DragFloat3(
-					"MultiMaterial Translate",
-					&transformMultiMaterial.translate.x,
-					0.01f
-				);
-
-				ImGui::DragFloat3(
-					"MultiMaterial Scale",
-					&transformMultiMaterial.scale.x,
-					0.01f,
-					0.01f,
-					10.0f
-				);
-
-				ImGui::SliderAngle(
-					"MultiMaterial Rotate X",
-					&transformMultiMaterial.rotate.x
-				);
-
-				ImGui::SliderAngle(
-					"MultiMaterial Rotate Y",
-					&transformMultiMaterial.rotate.y
-				);
-
-				ImGui::SliderAngle(
-					"MultiMaterial Rotate Z",
-					&transformMultiMaterial.rotate.z
-				);
-			}
-
-			ImGui::ColorEdit4("Color", &materialColor.x);
-			ImGui::Checkbox(
-				"Use Model Texture",
-				&useModelTexture
-			);
-
-			// ==============================
-			// OBJモデル操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"Plane Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-
-				ImGui::DragFloat3(
-					"Plane Translate",
-					&transformPlane.translate.x,
-					0.01f
-				);
-
-				ImGui::DragFloat3(
-					"Plane Scale",
-					&transformPlane.scale.x,
-					0.01f,
-					0.01f,
-					10.0f
-				);
-
-				ImGui::SliderAngle(
-					"Plane Rotate X",
-					&transformPlane.rotate.x
-				);
-
-				ImGui::SliderAngle(
-					"Plane Rotate Y",
-					&transformPlane.rotate.y
-				);
-
-				ImGui::SliderAngle(
-					"Plane Rotate Z",
-					&transformPlane.rotate.z
-				);
-			}
-
-			// ==============================
-			// Sphere操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"Sphere Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-
-				ImGui::DragFloat3(
-					"Sphere Translate",
-					&transformSphere.translate.x,
-					0.01f
-				);
-
-				ImGui::DragFloat3(
-					"Sphere Scale",
-					&transformSphere.scale.x,
-					0.01f,
-					0.01f,
-					10.0f
-				);
-
-				ImGui::SliderAngle(
-					"Sphere Rotate X",
-					&transformSphere.rotate.x
-				);
-
-				ImGui::SliderAngle(
-					"Sphere Rotate Y",
-					&transformSphere.rotate.y
-				);
-
-				ImGui::SliderAngle(
-					"Sphere Rotate Z",
-					&transformSphere.rotate.z
-				);
-			}
-
-			// ==============================
-			// Utah Teapot操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"Utah Teapot Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-				ImGui::DragFloat3(
-					"Teapot Translate",
-					&transformTeapot.translate.x,
-					0.01f
-				);
-
-				ImGui::DragFloat3(
-					"Teapot Scale",
-					&transformTeapot.scale.x,
-					0.01f,
-					0.001f,
-					10.0f
-				);
-
-				ImGui::SliderAngle(
-					"Teapot Rotate X",
-					&transformTeapot.rotate.x
-				);
-
-				ImGui::SliderAngle(
-					"Teapot Rotate Y",
-					&transformTeapot.rotate.y
-				);
-
-				ImGui::SliderAngle(
-					"Teapot Rotate Z",
-					&transformTeapot.rotate.z
-				);
-			}
-
-
-			// ==============================
-			// Stanford Bunny用 操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"Stanford Bunny Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-
-				ImGui::DragFloat3(
-					"Bunny Translate",
-					&transformBunny.translate.x,
-					0.01f
-				);
-
-				ImGui::DragFloat3(
-					"Bunny Scale",
-					&transformBunny.scale.x,
-					0.01f,
-					0.001f,
-					100.0f
-				);
-
-				ImGui::SliderAngle(
-					"Bunny Rotate X",
-					&transformBunny.rotate.x
-				);
-
-				ImGui::SliderAngle(
-					"Bunny Rotate Y",
-					&transformBunny.rotate.y
-				);
-
-				ImGui::SliderAngle(
-					"Bunny Rotate Z",
-					&transformBunny.rotate.z
-				);
-			}
-
-
-			// ==============================
-			// Suzanne操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"Suzanne Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-				ImGui::ColorEdit4(
-					"Suzanne Color",
-					&suzanneColor.x
-				);
-
-				ImGui::DragFloat3(
-					"Suzanne Translate",
-					&transformSuzanne.translate.x,
-					0.01f
-				);
-
-				ImGui::DragFloat3(
-					"Suzanne Scale",
-					&transformSuzanne.scale.x,
-					0.01f,
-					0.01f,
-					10.0f
-				);
-
-				ImGui::SliderAngle(
-					"Suzanne Rotate X",
-					&transformSuzanne.rotate.x
-				);
-
-				ImGui::SliderAngle(
-					"Suzanne Rotate Y",
-					&transformSuzanne.rotate.y
-				);
-
-				ImGui::SliderAngle(
-					"Suzanne Rotate Z",
-					&transformSuzanne.rotate.z
-				);
-			}
-
-
-			// ==============================
-			// Fence操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"Fence Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-				ImGui::DragFloat3(
-					"Fence Translate",
-					&transformFence.translate.x,
-					0.01f
-				);
-
-				ImGui::DragFloat3(
-					"Fence Scale",
-					&transformFence.scale.x,
-					0.01f,
-					0.01f,
-					10.0f
-				);
-
-				ImGui::SliderAngle(
-					"Fence Rotate Y",
-					&transformFence.rotate.y
-				);
-			}
-
-			// ===== ライト操作 =====
-			ImGui::Separator();
-			ImGui::SeparatorText("Lighting");
-
-			ImGui::Combo(
-				"Lighting Type",
-				&lightingType,
-				lightingTypeNames,
-				IM_ARRAYSIZE(lightingTypeNames)
-			);
-
-			// 色
-			ImGui::ColorEdit4("Light Color", &directionalLightData->color.x);
-
-			// 向き（重要）
-			ImGui::DragFloat3("Light Direction", &directionalLightData->direction.x, 0.01f);
-
-			// 強さ
-			ImGui::DragFloat("Intensity", &directionalLightData->intensity, 0.01f, 0.0f, 10.0f);
-
-
-			// ===== uvTransform操作 =====
-			ImGui::Separator();
-			ImGui::Text("uvTransform Sprite");
-			// ==============================
-			// Sprite本体の操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"Sprite Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-				ImGui::DragFloat3(
-					"Sprite Translate",
-					&transformSprite.translate.x,
-					1.0f
-				);
-
-				ImGui::DragFloat3(
-					"Sprite Scale",
-					&transformSprite.scale.x,
-					0.01f,
-					0.01f,
-					10.0f
-				);
-
-				ImGui::SliderAngle(
-					"Sprite Rotate Z",
-					&transformSprite.rotate.z
-				);
-			}
-
-			ImGui::DragFloat2("uvTransform Translate", &uvTransformSprite.translate.x, 0.01f, -10.0f, 10.0f);
-			ImGui::DragFloat2("uvTransform Scale", &uvTransformSprite.scale.x, 0.01f, 0.0f, 10.0f);
-			ImGui::SliderAngle("UVRotate", &uvTransformSprite.rotate.z);
-
-			// ===== デバッグカメラ操作 =====
-			ImGui::Separator();
-			ImGui::Text("Debug Camera");
-
-			// 通常カメラとデバッグカメラ切り替え
-			ImGui::Checkbox("Use Debug Camera", &isDebugCamera);
-
-			if (isDebugCamera) {
-
-				int cameraMode =
-					static_cast<int>(
-						debugCamera.GetMode()
-						);
-
-				const char* modeNames[] = {
-					"Orbit",
-					"Free"
-				};
-
-				if (ImGui::Combo(
-					"Camera Mode",
-					&cameraMode,
-					modeNames,
-					IM_ARRAYSIZE(modeNames)
-				)) {
-					debugCamera.SetMode(
-						static_cast<DebugCamera::Mode>(
-							cameraMode
-							)
-					);
-				}
-
-				if (
-					debugCamera.GetMode() ==
-					DebugCamera::Mode::kOrbit
-					) {
-
-					ImGui::Text("Orbit Camera");
-
-					// 注目点
-					ImGui::DragFloat3(
-						"Camera Target",
-						&debugCamera.GetTarget().x,
-						0.01f
-					);
-
-					// 回転
-					ImGui::SliderAngle(
-						"Camera Rotate X",
-						&debugCamera.GetRotation().x,
-						-89.0f,
-						89.0f
-					);
-
-					ImGui::SliderAngle(
-						"Camera Rotate Y",
-						&debugCamera.GetRotation().y,
-						-180.0f,
-						180.0f
-					);
-
-					// 距離
-					ImGui::DragFloat(
-						"Camera Distance",
-						&debugCamera.GetDistance(),
-						0.1f,
-						0.5f,
-						500.0f
-					);
-
-					// 操作速度
-					ImGui::DragFloat(
-						"Camera Rotate Speed",
-						&debugCamera.GetRotateSpeed(),
-						0.0001f,
-						0.0001f,
-						0.1f,
-						"%.4f"
-					);
-
-					ImGui::DragFloat(
-						"Camera Pan Speed",
-						&debugCamera.GetPanSpeed(),
-						0.001f,
-						0.001f,
-						1.0f,
-						"%.3f"
-					);
-
-					ImGui::DragFloat(
-						"Camera Zoom Speed",
-						&debugCamera.GetZoomSpeed(),
-						0.01f,
-						0.01f,
-						10.0f
-					);
-
-					ImGui::Text(
-						"Middle Drag : Orbit"
-					);
-
-					ImGui::Text(
-						"Shift + Middle Drag : Pan"
-					);
-
-					ImGui::Text(
-						"Mouse Wheel : Zoom"
-					);
-
-				}
-				else {
-
-					ImGui::Text("Free Camera");
-
-					ImGui::DragFloat3(
-						"Camera Position",
-						&debugCamera.GetTranslation().x,
-						0.01f
-					);
-
-					ImGui::DragFloat(
-						"Move Speed",
-						&debugCamera.GetMoveSpeed(),
-						0.01f,
-						0.01f,
-						10.0f
-					);
-
-					ImGui::Text(
-						"Right Drag : Rotate"
-					);
-
-					ImGui::Text(
-						"WASD : Move"
-					);
-
-					ImGui::Text(
-						"Space / Shift : Up Down"
-					);
-				}
-
+				// 回転
 				ImGui::SliderAngle(
 					"Camera Rotate X",
 					&debugCamera.GetRotation().x,
@@ -4206,8 +4048,18 @@ int WINAPI WinMain(
 					180.0f
 				);
 
+				// 距離
 				ImGui::DragFloat(
-					"Rotate Speed",
+					"Camera Distance",
+					&debugCamera.GetDistance(),
+					0.1f,
+					0.5f,
+					500.0f
+				);
+
+				// 操作速度
+				ImGui::DragFloat(
+					"Camera Rotate Speed",
 					&debugCamera.GetRotateSpeed(),
 					0.0001f,
 					0.0001f,
@@ -4215,950 +4067,1033 @@ int WINAPI WinMain(
 					"%.4f"
 				);
 
-				if (ImGui::Button(
-					"Reset Debug Camera"
-				)) {
-					debugCamera.Reset();
-				}
-			}
-
-			// ==============================
-			// GamePad情報
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"GamePad",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-				const bool isConnected =
-					input->IsGamePadConnected();
-
-				if (isConnected) {
-					ImGui::Text("Connected : Yes");
-
-					const GamePadStick leftStick =
-						input->GetLeftStick();
-
-					const GamePadStick rightStick =
-						input->GetRightStick();
-
-					const float leftTrigger =
-						input->GetLeftTrigger();
-
-					const float rightTrigger =
-						input->GetRightTrigger();
-
-					ImGui::Text(
-						"Left Stick  : %.2f, %.2f",
-						leftStick.x,
-						leftStick.y
-					);
-
-					ImGui::Text(
-						"Right Stick : %.2f, %.2f",
-						rightStick.x,
-						rightStick.y
-					);
-
-					ImGui::Text(
-						"Left Trigger  : %.2f",
-						leftTrigger
-					);
-
-					ImGui::Text(
-						"Right Trigger : %.2f",
-						rightTrigger
-					);
-
-					ImGui::Separator();
-
-					ImGui::Text(
-						"A : %s",
-						input->PushButton(
-							XINPUT_GAMEPAD_A
-						)
-						? "ON"
-						: "OFF"
-					);
-
-					ImGui::Text(
-						"B : %s",
-						input->PushButton(
-							XINPUT_GAMEPAD_B
-						)
-						? "ON"
-						: "OFF"
-					);
-
-					ImGui::Text(
-						"X : %s",
-						input->PushButton(
-							XINPUT_GAMEPAD_X
-						)
-						? "ON"
-						: "OFF"
-					);
-
-					ImGui::Text(
-						"Y : %s",
-						input->PushButton(
-							XINPUT_GAMEPAD_Y
-						)
-						? "ON"
-						: "OFF"
-					);
-				}
-				else {
-					ImGui::Text("Connected : No");
-				}
-			}
-
-			ImGui::End();
-
-
-
-			// ==========================================
-			// ImGui終了
-			// ==========================================
-
-			ImGui::Render();
-
-#endif
-			// ==============================
-			// Material更新
-			// ==============================
-			materialData->color = materialColor;
-			materialData->lightingType = lightingType;
-
-			// Suzanne専用Material更新
-			materialDataSuzanne->color = suzanneColor;
-			materialDataSuzanne->lightingType = lightingType;
-
-			// ==============================
-			// SpriteのUVTransform更新
-			// ==============================
-			Matrix4x4 uvTransformMatrixSprite =
-				Matrix::MakeScaleMatrix(
-					uvTransformSprite.scale
+				ImGui::DragFloat(
+					"Camera Pan Speed",
+					&debugCamera.GetPanSpeed(),
+					0.001f,
+					0.001f,
+					1.0f,
+					"%.3f"
 				);
 
-			uvTransformMatrixSprite =
-				Matrix::Multiply(
-					uvTransformMatrixSprite,
-					Matrix::MakeRotateZMatrix(
-						uvTransformSprite.rotate.z
-					)
+				ImGui::DragFloat(
+					"Camera Zoom Speed",
+					&debugCamera.GetZoomSpeed(),
+					0.01f,
+					0.01f,
+					10.0f
 				);
 
-			uvTransformMatrixSprite =
-				Matrix::Multiply(
-					uvTransformMatrixSprite,
-					Matrix::MakeTranslateMatrix(
-						uvTransformSprite.translate
-					)
+				ImGui::Text(
+					"Middle Drag : Orbit"
 				);
 
-			// Sprite専用Materialへ毎フレーム反映
-			materialDataSprite->uvTransform =
-				uvTransformMatrixSprite;
-
-			// ==============================
-			// Plane World行列
-			// ==============================
-			Matrix4x4 worldMatrixPlane =
-				Matrix::MakeAffineMatrix(
-					transformPlane.scale,
-					transformPlane.rotate,
-					transformPlane.translate
+				ImGui::Text(
+					"Shift + Middle Drag : Pan"
 				);
 
-			// ==============================
-			// Sphere World行列
-			// ==============================
-			Matrix4x4 worldMatrixSphere =
-				Matrix::MakeAffineMatrix(
-					transformSphere.scale,
-					transformSphere.rotate,
-					transformSphere.translate
+				ImGui::Text(
+					"Mouse Wheel : Zoom"
 				);
-
-			// ==============================
-			// Utah Teapot World行列
-			// ==============================
-			Matrix4x4 worldMatrixTeapot =
-				Matrix::MakeAffineMatrix(
-					transformTeapot.scale,
-					transformTeapot.rotate,
-					transformTeapot.translate
-				);
-
-			// ==============================
-			// Stanford Bunny World行列
-			// =============================
-
-			Matrix4x4 worldMatrixBunny =
-				Matrix::MakeAffineMatrix(
-					transformBunny.scale,
-					transformBunny.rotate,
-					transformBunny.translate
-				);
-
-
-
-
-			// ==============================
-			// MultiMesh World行列
-			// ==============================
-			Matrix4x4 worldMatrixMultiMesh =
-				Matrix::MakeAffineMatrix(
-					transformMultiMesh.scale,
-					transformMultiMesh.rotate,
-					transformMultiMesh.translate
-				);
-
-
-			// ==============================
-			// MultiMaterial World行列
-			// ==============================
-			Matrix4x4 worldMatrixMultiMaterial =
-				Matrix::MakeAffineMatrix(
-					transformMultiMaterial.scale,
-					transformMultiMaterial.rotate,
-					transformMultiMaterial.translate
-				);
-
-
-			// Suzanne
-			Matrix4x4 worldMatrixSuzanne =
-				Matrix::MakeAffineMatrix(
-					transformSuzanne.scale,
-					transformSuzanne.rotate,
-					transformSuzanne.translate
-				);
-
-			// ==============================
-			// カメラ切り替え
-			// ==============================
-			Matrix4x4 viewMatrix{};
-
-			if (isDebugCamera) {
-
-				viewMatrix =
-					debugCamera.GetViewMatrix();
 
 			}
 			else {
 
-				Matrix4x4 cameraMatrix =
-					Matrix::MakeAffineMatrix(
-						cameraTransform.scale,
-						cameraTransform.rotate,
-						cameraTransform.translate
-					);
+				ImGui::Text("Free Camera");
 
-				viewMatrix =
-					Matrix::Inverse(cameraMatrix);
+				ImGui::DragFloat3(
+					"Camera Position",
+					&debugCamera.GetTranslation().x,
+					0.01f
+				);
+
+				ImGui::DragFloat(
+					"Move Speed",
+					&debugCamera.GetMoveSpeed(),
+					0.01f,
+					0.01f,
+					10.0f
+				);
+
+				ImGui::Text(
+					"Right Drag : Rotate"
+				);
+
+				ImGui::Text(
+					"WASD : Move"
+				);
+
+				ImGui::Text(
+					"Space / Shift : Up Down"
+				);
 			}
 
-			// ==============================
-			// Projection
-			// ==============================
-			Matrix4x4 projectionMatrix =
-				Matrix::MakePerspectiveFovMatrix(
-					0.45f,
-					static_cast<float>(kClientWidth) /
-					static_cast<float>(kClientHeight),
-					0.1f,
-					100.0f
+			ImGui::SliderAngle(
+				"Camera Rotate X",
+				&debugCamera.GetRotation().x,
+				-89.0f,
+				89.0f
+			);
+
+			ImGui::SliderAngle(
+				"Camera Rotate Y",
+				&debugCamera.GetRotation().y,
+				-180.0f,
+				180.0f
+			);
+
+			ImGui::DragFloat(
+				"Rotate Speed",
+				&debugCamera.GetRotateSpeed(),
+				0.0001f,
+				0.0001f,
+				0.1f,
+				"%.4f"
+			);
+
+			if (ImGui::Button(
+				"Reset Debug Camera"
+			)) {
+				debugCamera.Reset();
+			}
+		}
+
+		// ==============================
+		// GamePad情報
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"GamePad",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
+			const bool isConnected =
+				input->IsGamePadConnected();
+
+			if (isConnected) {
+				ImGui::Text("Connected : Yes");
+
+				const GamePadStick leftStick =
+					input->GetLeftStick();
+
+				const GamePadStick rightStick =
+					input->GetRightStick();
+
+				const float leftTrigger =
+					input->GetLeftTrigger();
+
+				const float rightTrigger =
+					input->GetRightTrigger();
+
+				ImGui::Text(
+					"Left Stick  : %.2f, %.2f",
+					leftStick.x,
+					leftStick.y
 				);
 
-			// ==============================
-			// ViewProjection
-			// ==============================
-			Matrix4x4 viewProjectionMatrix =
-				Matrix::Multiply(
-					viewMatrix,
-					projectionMatrix
+				ImGui::Text(
+					"Right Stick : %.2f, %.2f",
+					rightStick.x,
+					rightStick.y
 				);
 
-			// ==============================
-			// Plane WVP
-			// ==============================
-			wvpDataPlane->World =
-				worldMatrixPlane;
-
-			wvpDataPlane->WVP =
-				Matrix::Multiply(
-					worldMatrixPlane,
-					viewProjectionMatrix
+				ImGui::Text(
+					"Left Trigger  : %.2f",
+					leftTrigger
 				);
 
-			// ==============================
-			// Sphere WVP
-			// ==============================
-			wvpDataSphere->World =
-				worldMatrixSphere;
-
-			wvpDataSphere->WVP =
-				Matrix::Multiply(
-					worldMatrixSphere,
-					viewProjectionMatrix
+				ImGui::Text(
+					"Right Trigger : %.2f",
+					rightTrigger
 				);
 
-			// ==============================
-			// Utah Teapot WVP
-			// ==============================
-			wvpDataTeapot->World =
-				worldMatrixTeapot;
+				ImGui::Separator();
 
-			wvpDataTeapot->WVP =
-				Matrix::Multiply(
-					worldMatrixTeapot,
-					viewProjectionMatrix
+				ImGui::Text(
+					"A : %s",
+					input->PushButton(
+						XINPUT_GAMEPAD_A
+					)
+					? "ON"
+					: "OFF"
 				);
 
-
-			// ==============================
-			// Stanford Bunny WVP
-			// ==============================
-			wvpDataBunny->World =
-				worldMatrixBunny;
-
-			wvpDataBunny->WVP =
-				Matrix::Multiply(
-					worldMatrixBunny,
-					viewProjectionMatrix
+				ImGui::Text(
+					"B : %s",
+					input->PushButton(
+						XINPUT_GAMEPAD_B
+					)
+					? "ON"
+					: "OFF"
 				);
 
-
-			// ==============================
-			// MultiMesh WVP
-			// ==============================
-			wvpDataMultiMesh->World =
-				worldMatrixMultiMesh;
-
-			wvpDataMultiMesh->WVP =
-				Matrix::Multiply(
-					worldMatrixMultiMesh,
-					viewProjectionMatrix
+				ImGui::Text(
+					"X : %s",
+					input->PushButton(
+						XINPUT_GAMEPAD_X
+					)
+					? "ON"
+					: "OFF"
 				);
 
-
-			// ==============================
-			// MultiMaterial WVP
-			// ==============================
-			wvpDataMultiMaterial->World =
-				worldMatrixMultiMaterial;
-
-			wvpDataMultiMaterial->WVP =
-				Matrix::Multiply(
-					worldMatrixMultiMaterial,
-					viewProjectionMatrix
+				ImGui::Text(
+					"Y : %s",
+					input->PushButton(
+						XINPUT_GAMEPAD_Y
+					)
+					? "ON"
+					: "OFF"
 				);
+			}
+			else {
+				ImGui::Text("Connected : No");
+			}
+		}
+
+		ImGui::End();
 
 
-			// Suzanne
-			wvpDataSuzanne->World = worldMatrixSuzanne;
-			wvpDataSuzanne->WVP =
-				Matrix::Multiply(
-					worldMatrixSuzanne,
-					viewProjectionMatrix
-				);
 
-			// Fence
-			Matrix4x4 worldMatrixFence =
+		// ==========================================
+		// ImGui終了
+		// ==========================================
+
+		ImGui::Render();
+
+#endif
+		// ==============================
+		// Material更新
+		// ==============================
+		materialData->color = materialColor;
+		materialData->lightingType = lightingType;
+
+		// Suzanne専用Material更新
+		materialDataSuzanne->color = suzanneColor;
+		materialDataSuzanne->lightingType = lightingType;
+
+		// ==============================
+		// SpriteのUVTransform更新
+		// ==============================
+		Matrix4x4 uvTransformMatrixSprite =
+			Matrix::MakeScaleMatrix(
+				uvTransformSprite.scale
+			);
+
+		uvTransformMatrixSprite =
+			Matrix::Multiply(
+				uvTransformMatrixSprite,
+				Matrix::MakeRotateZMatrix(
+					uvTransformSprite.rotate.z
+				)
+			);
+
+		uvTransformMatrixSprite =
+			Matrix::Multiply(
+				uvTransformMatrixSprite,
+				Matrix::MakeTranslateMatrix(
+					uvTransformSprite.translate
+				)
+			);
+
+		// Sprite専用Materialへ毎フレーム反映
+		materialDataSprite->uvTransform =
+			uvTransformMatrixSprite;
+
+		// ==============================
+		// Plane World行列
+		// ==============================
+		Matrix4x4 worldMatrixPlane =
+			Matrix::MakeAffineMatrix(
+				transformPlane.scale,
+				transformPlane.rotate,
+				transformPlane.translate
+			);
+
+		// ==============================
+		// Sphere World行列
+		// ==============================
+		Matrix4x4 worldMatrixSphere =
+			Matrix::MakeAffineMatrix(
+				transformSphere.scale,
+				transformSphere.rotate,
+				transformSphere.translate
+			);
+
+		// ==============================
+		// Utah Teapot World行列
+		// ==============================
+		Matrix4x4 worldMatrixTeapot =
+			Matrix::MakeAffineMatrix(
+				transformTeapot.scale,
+				transformTeapot.rotate,
+				transformTeapot.translate
+			);
+
+		// ==============================
+		// Stanford Bunny World行列
+		// =============================
+
+		Matrix4x4 worldMatrixBunny =
+			Matrix::MakeAffineMatrix(
+				transformBunny.scale,
+				transformBunny.rotate,
+				transformBunny.translate
+			);
+
+
+
+
+		// ==============================
+		// MultiMesh World行列
+		// ==============================
+		Matrix4x4 worldMatrixMultiMesh =
+			Matrix::MakeAffineMatrix(
+				transformMultiMesh.scale,
+				transformMultiMesh.rotate,
+				transformMultiMesh.translate
+			);
+
+
+		// ==============================
+		// MultiMaterial World行列
+		// ==============================
+		Matrix4x4 worldMatrixMultiMaterial =
+			Matrix::MakeAffineMatrix(
+				transformMultiMaterial.scale,
+				transformMultiMaterial.rotate,
+				transformMultiMaterial.translate
+			);
+
+
+		// Suzanne
+		Matrix4x4 worldMatrixSuzanne =
+			Matrix::MakeAffineMatrix(
+				transformSuzanne.scale,
+				transformSuzanne.rotate,
+				transformSuzanne.translate
+			);
+
+		// ==============================
+		// カメラ切り替え
+		// ==============================
+		Matrix4x4 viewMatrix{};
+
+		if (isDebugCamera) {
+
+			viewMatrix =
+				debugCamera.GetViewMatrix();
+
+		}
+		else {
+
+			Matrix4x4 cameraMatrix =
 				Matrix::MakeAffineMatrix(
-					transformFence.scale,
-					transformFence.rotate,
-					transformFence.translate
+					cameraTransform.scale,
+					cameraTransform.rotate,
+					cameraTransform.translate
 				);
 
-			Matrix4x4 worldViewProjectionMatrixFence =
-				Matrix::Multiply(
-					worldMatrixFence,
-					viewProjectionMatrix
-				);
+			viewMatrix =
+				Matrix::Inverse(cameraMatrix);
+		}
 
-			wvpDataFence->WVP =
-				worldViewProjectionMatrixFence;
+		// ==============================
+		// Projection
+		// ==============================
+		Matrix4x4 projectionMatrix =
+			Matrix::MakePerspectiveFovMatrix(
+				0.45f,
+				static_cast<float>(kClientWidth) /
+				static_cast<float>(kClientHeight),
+				0.1f,
+				100.0f
+			);
 
-			wvpDataFence->World =
-				worldMatrixFence;
+		// ==============================
+		// ViewProjection
+		// ==============================
+		Matrix4x4 viewProjectionMatrix =
+			Matrix::Multiply(
+				viewMatrix,
+				projectionMatrix
+			);
+
+		// ==============================
+		// Plane WVP
+		// ==============================
+		wvpDataPlane->World =
+			worldMatrixPlane;
+
+		wvpDataPlane->WVP =
+			Matrix::Multiply(
+				worldMatrixPlane,
+				viewProjectionMatrix
+			);
+
+		// ==============================
+		// Sphere WVP
+		// ==============================
+		wvpDataSphere->World =
+			worldMatrixSphere;
+
+		wvpDataSphere->WVP =
+			Matrix::Multiply(
+				worldMatrixSphere,
+				viewProjectionMatrix
+			);
+
+		// ==============================
+		// Utah Teapot WVP
+		// ==============================
+		wvpDataTeapot->World =
+			worldMatrixTeapot;
+
+		wvpDataTeapot->WVP =
+			Matrix::Multiply(
+				worldMatrixTeapot,
+				viewProjectionMatrix
+			);
 
 
-			//Sprite用のWorldViewProjectionMatrixを作る
-			Matrix4x4 worldMatrixSprite = Matrix::MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
-			Matrix4x4 ViewMatrixSprite = Matrix::MakeIdentity4x4();
-			Matrix4x4 projectionMatrixSprite = Matrix::MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
-			Matrix4x4 worldViewProjectionMatrixSprite = Matrix::Multiply(worldMatrixSprite, Matrix::Multiply(ViewMatrixSprite, projectionMatrixSprite));
-			*transformationMatrixDataSprite = worldViewProjectionMatrixSprite;
+		// ==============================
+		// Stanford Bunny WVP
+		// ==============================
+		wvpDataBunny->World =
+			worldMatrixBunny;
+
+		wvpDataBunny->WVP =
+			Matrix::Multiply(
+				worldMatrixBunny,
+				viewProjectionMatrix
+			);
 
 
-			//三角形の描画
-			commandList->RSSetViewports(1, &viewport);			// ビューポートの設定
-			commandList->RSSetScissorRects(1, &scissorRect);	// シザリング矩形の設定
-			//RootSignatureとPSOに設定してるけど別途設定が必要
-			commandList->SetGraphicsRootSignature(rootSignature.Get()); // RootSignatureの設定
-			commandList->SetPipelineState(graphicsPipelineState); // PSOの設定
-			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSphere);			// 頂点バッファビューの設定
-			commandList->IASetIndexBuffer(&indexBufferViewSprite); //IBVを設定
-			//形状を設定。PSOに設定しているものとはまた別。同じものを設定すると考えておけばいい
-			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // トポロジの設定
-			//マテリアルCBufferの場所を設定
-			commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress()); // Materialリソースの設定。RootParameterのShaderRegisterと合わせること
-			//WVP行列CBufferの場所を設定
-			commandList->SetGraphicsRootConstantBufferView(1, wvpResourceSphere->GetGPUVirtualAddress()); // WVPリソースの設定。RootParameterのShaderRegisterと合わせること
-			//DirectionalLight用の定数バッファ(CBV)をRootParameter[3]にセットする
-			commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
-			//SRVのDescriptorTableの先頭を設定。2はrootParamater[2]である
-			commandList->SetGraphicsRootDescriptorTable(2, useModelTexture ? textureSrvHandleGPU2 : textureSrvHandleGPU); // SRVの設定。RootParameterのShaderRegisterと合わせること
-			//描画！　(DrawCall/ドローコール)。　3頂点で一つのインスタンス。インスタンスについては今後
-			// ==========================================
-			// Sphere描画
-			// ==========================================
-			if (isDrawSphere) {
+		// ==============================
+		// MultiMesh WVP
+		// ==============================
+		wvpDataMultiMesh->World =
+			worldMatrixMultiMesh;
 
+		wvpDataMultiMesh->WVP =
+			Matrix::Multiply(
+				worldMatrixMultiMesh,
+				viewProjectionMatrix
+			);
+
+
+		// ==============================
+		// MultiMaterial WVP
+		// ==============================
+		wvpDataMultiMaterial->World =
+			worldMatrixMultiMaterial;
+
+		wvpDataMultiMaterial->WVP =
+			Matrix::Multiply(
+				worldMatrixMultiMaterial,
+				viewProjectionMatrix
+			);
+
+
+		// Suzanne
+		wvpDataSuzanne->World = worldMatrixSuzanne;
+		wvpDataSuzanne->WVP =
+			Matrix::Multiply(
+				worldMatrixSuzanne,
+				viewProjectionMatrix
+			);
+
+		// Fence
+		Matrix4x4 worldMatrixFence =
+			Matrix::MakeAffineMatrix(
+				transformFence.scale,
+				transformFence.rotate,
+				transformFence.translate
+			);
+
+		Matrix4x4 worldViewProjectionMatrixFence =
+			Matrix::Multiply(
+				worldMatrixFence,
+				viewProjectionMatrix
+			);
+
+		wvpDataFence->WVP =
+			worldViewProjectionMatrixFence;
+
+		wvpDataFence->World =
+			worldMatrixFence;
+
+
+		//Sprite用のWorldViewProjectionMatrixを作る
+		Matrix4x4 worldMatrixSprite = Matrix::MakeAffineMatrix(transformSprite.scale, transformSprite.rotate, transformSprite.translate);
+		Matrix4x4 ViewMatrixSprite = Matrix::MakeIdentity4x4();
+		Matrix4x4 projectionMatrixSprite = Matrix::MakeOrthographicMatrix(0.0f, 0.0f, float(kClientWidth), float(kClientHeight), 0.0f, 100.0f);
+		Matrix4x4 worldViewProjectionMatrixSprite = Matrix::Multiply(worldMatrixSprite, Matrix::Multiply(ViewMatrixSprite, projectionMatrixSprite));
+		*transformationMatrixDataSprite = worldViewProjectionMatrixSprite;
+
+
+		//三角形の描画
+		commandList->RSSetViewports(1, &viewport);			// ビューポートの設定
+		commandList->RSSetScissorRects(1, &scissorRect);	// シザリング矩形の設定
+		//RootSignatureとPSOに設定してるけど別途設定が必要
+		commandList->SetGraphicsRootSignature(rootSignature.Get()); // RootSignatureの設定
+		commandList->SetPipelineState(graphicsPipelineState); // PSOの設定
+		commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSphere);			// 頂点バッファビューの設定
+		commandList->IASetIndexBuffer(&indexBufferViewSprite); //IBVを設定
+		//形状を設定。PSOに設定しているものとはまた別。同じものを設定すると考えておけばいい
+		commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); // トポロジの設定
+		//マテリアルCBufferの場所を設定
+		commandList->SetGraphicsRootConstantBufferView(0, materialResource->GetGPUVirtualAddress()); // Materialリソースの設定。RootParameterのShaderRegisterと合わせること
+		//WVP行列CBufferの場所を設定
+		commandList->SetGraphicsRootConstantBufferView(1, wvpResourceSphere->GetGPUVirtualAddress()); // WVPリソースの設定。RootParameterのShaderRegisterと合わせること
+		//DirectionalLight用の定数バッファ(CBV)をRootParameter[3]にセットする
+		commandList->SetGraphicsRootConstantBufferView(3, directionalLightResource->GetGPUVirtualAddress());
+		//SRVのDescriptorTableの先頭を設定。2はrootParamater[2]である
+		commandList->SetGraphicsRootDescriptorTable(2, useModelTexture ? textureSrvHandleGPU2 : textureSrvHandleGPU); // SRVの設定。RootParameterのShaderRegisterと合わせること
+		//描画！　(DrawCall/ドローコール)。　3頂点で一つのインスタンス。インスタンスについては今後
+		// ==========================================
+		// Sphere描画
+		// ==========================================
+		if (isDrawSphere) {
+
+			commandList->IASetVertexBuffers(
+				0,
+				1,
+				&vertexBufferViewSphere
+			);
+
+			commandList->IASetIndexBuffer(nullptr);
+
+			// Material
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResource->GetGPUVirtualAddress()
+			);
+
+			// Sphere専用WVP
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResourceSphere->GetGPUVirtualAddress()
+			);
+
+			// Texture
+			commandList->SetGraphicsRootDescriptorTable(
+				2,
+				textureSrvHandleGPU
+			);
+
+			// Light
+			commandList->SetGraphicsRootConstantBufferView(
+				3,
+				directionalLightResource->GetGPUVirtualAddress()
+			);
+
+			commandList->DrawInstanced(
+				kVertexCount,
+				1,
+				0,
+				0
+			);
+		}
+
+		// ==========================================
+		// Plane描画
+		// ==========================================
+		if (isDrawPlane) {
+			commandList->IASetVertexBuffers(
+				0,
+				1,
+				&vertexBufferViewPlane
+			);
+
+			commandList->IASetIndexBuffer(nullptr);
+
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResource->GetGPUVirtualAddress()
+			);
+
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResourcePlane->GetGPUVirtualAddress()
+			);
+
+			commandList->SetGraphicsRootDescriptorTable(
+				2,
+				textureSrvHandleGPU2
+			);
+
+			commandList->SetGraphicsRootConstantBufferView(
+				3,
+				directionalLightResource->GetGPUVirtualAddress()
+			);
+
+			commandList->DrawInstanced(
+				static_cast<UINT>(modelDataPlane.vertices.size()),
+				1,
+				0,
+				0
+			);
+		}
+
+		// ==========================================
+		// Utah Teapot描画
+		// ==========================================
+		if (isDrawTeapot) {
+
+			commandList->IASetVertexBuffers(
+				0,
+				1,
+				&vertexBufferViewTeapot
+			);
+
+			commandList->IASetIndexBuffer(nullptr);
+
+			// Material
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResource->GetGPUVirtualAddress()
+			);
+
+			// Teapot専用WVP
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResourceTeapot->GetGPUVirtualAddress()
+			);
+
+			// Teapot専用checkerBoardテクスチャ
+			commandList->SetGraphicsRootDescriptorTable(
+				2,
+				textureSrvHandleGPUTeapot
+			);
+
+			// Light
+			commandList->SetGraphicsRootConstantBufferView(
+				3,
+				directionalLightResource->GetGPUVirtualAddress()
+			);
+
+			commandList->DrawInstanced(
+				static_cast<UINT>(
+					modelDataTeapot.vertices.size()
+					),
+				1,
+				0,
+				0
+			);
+		}
+
+		commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
+
+
+		// ==========================================
+		// Stanford Bunny描画
+		// ==========================================
+		if (isDrawBunny) {
+
+			commandList->IASetVertexBuffers(
+				0,
+				1,
+				&vertexBufferViewBunny
+			);
+
+			commandList->IASetIndexBuffer(nullptr);
+
+			// Material
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResource->GetGPUVirtualAddress()
+			);
+
+			// Bunny専用WVP
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResourceBunny->GetGPUVirtualAddress()
+			);
+
+			// Bunny専用Texture
+			commandList->SetGraphicsRootDescriptorTable(
+				2,
+				textureSrvHandleGPUBunny
+			);
+
+			// DirectionalLight
+			commandList->SetGraphicsRootConstantBufferView(
+				3,
+				directionalLightResource->GetGPUVirtualAddress()
+			);
+
+			commandList->DrawInstanced(
+				static_cast<UINT>(
+					modelDataBunny.vertices.size()
+					),
+				1,
+				0,
+				0
+			);
+		}
+
+		// ==========================================
+		// Fence描画
+		// ==========================================
+		if (isDrawFence) {
+
+			commandList->IASetVertexBuffers(
+				0,
+				1,
+				&vertexBufferViewFence
+			);
+
+			commandList->IASetIndexBuffer(nullptr);
+
+			// Material
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResource->GetGPUVirtualAddress()
+			);
+
+			// Fence用WVP
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResourceFence->GetGPUVirtualAddress()
+			);
+
+			// Fence専用Texture
+			commandList->SetGraphicsRootDescriptorTable(
+				2,
+				textureSrvHandleGPUFence
+			);
+
+			// DirectionalLight
+			commandList->SetGraphicsRootConstantBufferView(
+				3,
+				directionalLightResource->GetGPUVirtualAddress()
+			);
+
+			commandList->DrawInstanced(
+				static_cast<UINT>(
+					modelDataFence.vertices.size()
+					),
+				1,
+				0,
+				0
+			);
+		}
+
+		// ==========================================
+		// MultiMesh描画
+		// Meshごとに独立したVertexBufferを設定する
+		// ==========================================
+		if (isDrawMultiMesh) {
+			commandList->SetGraphicsRootSignature(
+				rootSignature.Get()
+			);
+
+			commandList->SetPipelineState(
+				graphicsPipelineState
+			);
+
+			commandList->IASetPrimitiveTopology(
+				D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
+			);
+
+			commandList->IASetIndexBuffer(nullptr);
+
+			// 全Mesh共通Material
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResource->GetGPUVirtualAddress()
+			);
+
+			// 全Mesh共通Transform
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResourceMultiMesh->GetGPUVirtualAddress()
+			);
+
+			// multiMesh.mtlはuvChecker.pngを使用
+			commandList->SetGraphicsRootDescriptorTable(
+				2,
+				textureSrvHandleGPU
+			);
+
+			commandList->SetGraphicsRootConstantBufferView(
+				3,
+				directionalLightResource->
+				GetGPUVirtualAddress()
+			);
+
+			for (
+				const MeshData& mesh :
+				modelDataMultiMesh.meshes
+				) {
 				commandList->IASetVertexBuffers(
 					0,
 					1,
-					&vertexBufferViewSphere
-				);
-
-				commandList->IASetIndexBuffer(nullptr);
-
-				// Material
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResource->GetGPUVirtualAddress()
-				);
-
-				// Sphere専用WVP
-				commandList->SetGraphicsRootConstantBufferView(
-					1,
-					wvpResourceSphere->GetGPUVirtualAddress()
-				);
-
-				// Texture
-				commandList->SetGraphicsRootDescriptorTable(
-					2,
-					textureSrvHandleGPU
-				);
-
-				// Light
-				commandList->SetGraphicsRootConstantBufferView(
-					3,
-					directionalLightResource->GetGPUVirtualAddress()
-				);
-
-				commandList->DrawInstanced(
-					kVertexCount,
-					1,
-					0,
-					0
-				);
-			}
-
-			// ==========================================
-			// Plane描画
-			// ==========================================
-			if (isDrawPlane) {
-				commandList->IASetVertexBuffers(
-					0,
-					1,
-					&vertexBufferViewPlane
-				);
-
-				commandList->IASetIndexBuffer(nullptr);
-
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResource->GetGPUVirtualAddress()
-				);
-
-				commandList->SetGraphicsRootConstantBufferView(
-					1,
-					wvpResourcePlane->GetGPUVirtualAddress()
-				);
-
-				commandList->SetGraphicsRootDescriptorTable(
-					2,
-					textureSrvHandleGPU2
-				);
-
-				commandList->SetGraphicsRootConstantBufferView(
-					3,
-					directionalLightResource->GetGPUVirtualAddress()
-				);
-
-				commandList->DrawInstanced(
-					static_cast<UINT>(modelDataPlane.vertices.size()),
-					1,
-					0,
-					0
-				);
-			}
-
-			// ==========================================
-			// Utah Teapot描画
-			// ==========================================
-			if (isDrawTeapot) {
-
-				commandList->IASetVertexBuffers(
-					0,
-					1,
-					&vertexBufferViewTeapot
-				);
-
-				commandList->IASetIndexBuffer(nullptr);
-
-				// Material
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResource->GetGPUVirtualAddress()
-				);
-
-				// Teapot専用WVP
-				commandList->SetGraphicsRootConstantBufferView(
-					1,
-					wvpResourceTeapot->GetGPUVirtualAddress()
-				);
-
-				// Teapot専用checkerBoardテクスチャ
-				commandList->SetGraphicsRootDescriptorTable(
-					2,
-					textureSrvHandleGPUTeapot
-				);
-
-				// Light
-				commandList->SetGraphicsRootConstantBufferView(
-					3,
-					directionalLightResource->GetGPUVirtualAddress()
+					&mesh.vertexBufferView
 				);
 
 				commandList->DrawInstanced(
 					static_cast<UINT>(
-						modelDataTeapot.vertices.size()
+						mesh.vertices.size()
 						),
 					1,
 					0,
 					0
 				);
 			}
+		}
 
-			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPU);
 
+		// ==========================================
+		// MultiMaterial描画
+		// MeshごとにVertexBufferとTextureを切り替える
+		// ==========================================
+		if (isDrawMultiMaterial) {
+			commandList->SetGraphicsRootSignature(
+				rootSignature.Get()
+			);
 
-			// ==========================================
-			// Stanford Bunny描画
-			// ==========================================
-			if (isDrawBunny) {
+			commandList->SetPipelineState(
+				graphicsPipelineState
+			);
 
-				commandList->IASetVertexBuffers(
-					0,
-					1,
-					&vertexBufferViewBunny
+			commandList->IASetPrimitiveTopology(
+				D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
+			);
+
+			commandList->IASetIndexBuffer(nullptr);
+
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResource->GetGPUVirtualAddress()
+			);
+
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResourceMultiMaterial->
+				GetGPUVirtualAddress()
+			);
+
+			commandList->SetGraphicsRootConstantBufferView(
+				3,
+				directionalLightResource->
+				GetGPUVirtualAddress()
+			);
+
+			for (
+				const MeshData& mesh :
+				modelDataMultiMaterial.meshes
+				) {
+				assert(
+					mesh.materialIndex <
+					modelDataMultiMaterial.materials.size()
 				);
 
-				commandList->IASetIndexBuffer(nullptr);
+				const MaterialData& material =
+					modelDataMultiMaterial.materials[
+						mesh.materialIndex
+					];
 
-				// Material
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResource->GetGPUVirtualAddress()
-				);
+				D3D12_GPU_DESCRIPTOR_HANDLE
+					textureHandle{};
 
-				// Bunny専用WVP
-				commandList->SetGraphicsRootConstantBufferView(
-					1,
-					wvpResourceBunny->GetGPUVirtualAddress()
-				);
-
-				// Bunny専用Texture
-				commandList->SetGraphicsRootDescriptorTable(
-					2,
-					textureSrvHandleGPUBunny
-				);
-
-				// DirectionalLight
-				commandList->SetGraphicsRootConstantBufferView(
-					3,
-					directionalLightResource->GetGPUVirtualAddress()
-				);
-
-				commandList->DrawInstanced(
-					static_cast<UINT>(
-						modelDataBunny.vertices.size()
-						),
-					1,
-					0,
-					0
-				);
-			}
-
-			// ==========================================
-			// Fence描画
-			// ==========================================
-			if (isDrawFence) {
-
-				commandList->IASetVertexBuffers(
-					0,
-					1,
-					&vertexBufferViewFence
-				);
-
-				commandList->IASetIndexBuffer(nullptr);
-
-				// Material
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResource->GetGPUVirtualAddress()
-				);
-
-				// Fence用WVP
-				commandList->SetGraphicsRootConstantBufferView(
-					1,
-					wvpResourceFence->GetGPUVirtualAddress()
-				);
-
-				// Fence専用Texture
-				commandList->SetGraphicsRootDescriptorTable(
-					2,
-					textureSrvHandleGPUFence
-				);
-
-				// DirectionalLight
-				commandList->SetGraphicsRootConstantBufferView(
-					3,
-					directionalLightResource->GetGPUVirtualAddress()
-				);
-
-				commandList->DrawInstanced(
-					static_cast<UINT>(
-						modelDataFence.vertices.size()
-						),
-					1,
-					0,
-					0
-				);
-			}
-
-			// ==========================================
-			// MultiMesh描画
-			// Meshごとに独立したVertexBufferを設定する
-			// ==========================================
-			if (isDrawMultiMesh) {
-				commandList->SetGraphicsRootSignature(
-					rootSignature.Get()
-				);
-
-				commandList->SetPipelineState(
-					graphicsPipelineState
-				);
-
-				commandList->IASetPrimitiveTopology(
-					D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
-				);
-
-				commandList->IASetIndexBuffer(nullptr);
-
-				// 全Mesh共通Material
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResource->GetGPUVirtualAddress()
-				);
-
-				// 全Mesh共通Transform
-				commandList->SetGraphicsRootConstantBufferView(
-					1,
-					wvpResourceMultiMesh->GetGPUVirtualAddress()
-				);
-
-				// multiMesh.mtlはuvChecker.pngを使用
-				commandList->SetGraphicsRootDescriptorTable(
-					2,
-					textureSrvHandleGPU
-				);
-
-				commandList->SetGraphicsRootConstantBufferView(
-					3,
-					directionalLightResource->
-					GetGPUVirtualAddress()
-				);
-
-				for (
-					const MeshData& mesh :
-					modelDataMultiMesh.meshes
-					) {
-					commandList->IASetVertexBuffers(
-						0,
-						1,
-						&mesh.vertexBufferView
-					);
-
-					commandList->DrawInstanced(
-						static_cast<UINT>(
-							mesh.vertices.size()
-							),
-						1,
-						0,
-						0
-					);
+				if (material.textureIndex == 5) {
+					textureHandle =
+						textureSrvHandleGPUMonsterBall;
 				}
-			}
-
-
-			// ==========================================
-			// MultiMaterial描画
-			// MeshごとにVertexBufferとTextureを切り替える
-			// ==========================================
-			if (isDrawMultiMaterial) {
-				commandList->SetGraphicsRootSignature(
-					rootSignature.Get()
-				);
-
-				commandList->SetPipelineState(
-					graphicsPipelineState
-				);
-
-				commandList->IASetPrimitiveTopology(
-					D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
-				);
-
-				commandList->IASetIndexBuffer(nullptr);
-
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResource->GetGPUVirtualAddress()
-				);
-
-				commandList->SetGraphicsRootConstantBufferView(
-					1,
-					wvpResourceMultiMaterial->
-					GetGPUVirtualAddress()
-				);
-
-				commandList->SetGraphicsRootConstantBufferView(
-					3,
-					directionalLightResource->
-					GetGPUVirtualAddress()
-				);
-
-				for (
-					const MeshData& mesh :
-					modelDataMultiMaterial.meshes
-					) {
-					assert(
-						mesh.materialIndex <
-						modelDataMultiMaterial.materials.size()
-					);
-
-					const MaterialData& material =
-						modelDataMultiMaterial.materials[
-							mesh.materialIndex
-						];
-
-					D3D12_GPU_DESCRIPTOR_HANDLE
-						textureHandle{};
-
-					if (material.textureIndex == 5) {
-						textureHandle =
-							textureSrvHandleGPUMonsterBall;
-					}
-					else {
-						textureHandle =
-							textureSrvHandleGPU;
-					}
-
-					commandList->
-						SetGraphicsRootDescriptorTable(
-							2,
-							textureHandle
-						);
-
-					commandList->IASetVertexBuffers(
-						0,
-						1,
-						&mesh.vertexBufferView
-					);
-
-					commandList->DrawInstanced(
-						static_cast<UINT>(
-							mesh.vertices.size()
-							),
-						1,
-						0,
-						0
-					);
+				else {
+					textureHandle =
+						textureSrvHandleGPU;
 				}
-			}
 
+				commandList->
+					SetGraphicsRootDescriptorTable(
+						2,
+						textureHandle
+					);
 
-			// ==========================================
-			// Suzanne描画（UVなし専用Pipeline）
-			// ==========================================
-			if (isDrawSuzanne) {
-				commandList->SetGraphicsRootSignature(rootSignatureSuzanne.Get());
-				commandList->SetPipelineState(graphicsPipelineStateSuzanne.Get());
-				commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-				commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSuzanne);
-				commandList->IASetIndexBuffer(nullptr);
-
-				// Suzanne専用Material : b0
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResourceSuzanne->GetGPUVirtualAddress()
-				);
-
-				// TransformationMatrix : b1 (VS)
-				commandList->SetGraphicsRootConstantBufferView(
-					1,
-					wvpResourceSuzanne->GetGPUVirtualAddress()
-				);
-
-				// DirectionalLight : b1 (PS)
-				commandList->SetGraphicsRootConstantBufferView(
-					2,
-					directionalLightResource->GetGPUVirtualAddress()
-				);
-
-				commandList->DrawInstanced(
-					static_cast<UINT>(modelDataSuzanne.size()),
-					1,
-					0,
-					0
-				);
-
-				// 後続の通常モデル・Sprite用設定へ戻す
-				commandList->SetGraphicsRootSignature(rootSignature.Get());
-				commandList->SetPipelineState(graphicsPipelineState);
-			}
-
-			// ==========================================
-			// スプライト描画
-			// ==========================================
-			if (isDrawSprite) {
-
-				// Spriteで使用する通常モデル用設定へ確実に戻す
-				commandList->SetGraphicsRootSignature(
-					rootSignature.Get()
-				);
-
-				commandList->SetPipelineState(
-					graphicsPipelineState
-				);
-
-				commandList->IASetPrimitiveTopology(
-					D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
-				);
-
-				// Sprite用VertexBuffer
 				commandList->IASetVertexBuffers(
 					0,
 					1,
-					&vertexBufferViewSprite
+					&mesh.vertexBufferView
 				);
 
-				// Sprite用IndexBuffer
-				commandList->IASetIndexBuffer(
-					&indexBufferViewSprite
-				);
-
-				// RootParameter[0]
-				// Sprite用Material
-				commandList->SetGraphicsRootConstantBufferView(
-					0,
-					materialResourceSprite->GetGPUVirtualAddress()
-				);
-
-				// RootParameter[1]
-				// Sprite用WVP
-				commandList->SetGraphicsRootConstantBufferView(
+				commandList->DrawInstanced(
+					static_cast<UINT>(
+						mesh.vertices.size()
+						),
 					1,
-					transformationMatrixResourceSprite->
-					GetGPUVirtualAddress()
-				);
-
-				// RootParameter[2]
-				// Sprite用Texture
-				commandList->SetGraphicsRootDescriptorTable(
-					2,
-					textureSrvHandleGPU
-				);
-
-				// RootParameter[3]
-				// 通常RootSignatureにはDirectionalLightが必要
-				// SpriteではlightingTypeがkNoneなので実際の計算には使わない
-				commandList->SetGraphicsRootConstantBufferView(
-					3,
-					directionalLightResource->
-					GetGPUVirtualAddress()
-				);
-
-				commandList->DrawIndexedInstanced(
-					6,
-					1,
-					0,
 					0,
 					0
 				);
 			}
+		}
+
+
+		// ==========================================
+		// Suzanne描画（UVなし専用Pipeline）
+		// ==========================================
+		if (isDrawSuzanne) {
+			commandList->SetGraphicsRootSignature(rootSignatureSuzanne.Get());
+			commandList->SetPipelineState(graphicsPipelineStateSuzanne.Get());
+			commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewSuzanne);
+			commandList->IASetIndexBuffer(nullptr);
+
+			// Suzanne専用Material : b0
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResourceSuzanne->GetGPUVirtualAddress()
+			);
+
+			// TransformationMatrix : b1 (VS)
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				wvpResourceSuzanne->GetGPUVirtualAddress()
+			);
+
+			// DirectionalLight : b1 (PS)
+			commandList->SetGraphicsRootConstantBufferView(
+				2,
+				directionalLightResource->GetGPUVirtualAddress()
+			);
+
+			commandList->DrawInstanced(
+				static_cast<UINT>(modelDataSuzanne.size()),
+				1,
+				0,
+				0
+			);
+
+			// 後続の通常モデル・Sprite用設定へ戻す
+			commandList->SetGraphicsRootSignature(rootSignature.Get());
+			commandList->SetPipelineState(graphicsPipelineState);
+		}
+
+		// ==========================================
+		// スプライト描画
+		// ==========================================
+		if (isDrawSprite) {
+
+			// Spriteで使用する通常モデル用設定へ確実に戻す
+			commandList->SetGraphicsRootSignature(
+				rootSignature.Get()
+			);
+
+			commandList->SetPipelineState(
+				graphicsPipelineState
+			);
+
+			commandList->IASetPrimitiveTopology(
+				D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
+			);
+
+			// Sprite用VertexBuffer
+			commandList->IASetVertexBuffers(
+				0,
+				1,
+				&vertexBufferViewSprite
+			);
+
+			// Sprite用IndexBuffer
+			commandList->IASetIndexBuffer(
+				&indexBufferViewSprite
+			);
+
+			// RootParameter[0]
+			// Sprite用Material
+			commandList->SetGraphicsRootConstantBufferView(
+				0,
+				materialResourceSprite->GetGPUVirtualAddress()
+			);
+
+			// RootParameter[1]
+			// Sprite用WVP
+			commandList->SetGraphicsRootConstantBufferView(
+				1,
+				transformationMatrixResourceSprite->
+				GetGPUVirtualAddress()
+			);
+
+			// RootParameter[2]
+			// Sprite用Texture
+			commandList->SetGraphicsRootDescriptorTable(
+				2,
+				textureSrvHandleGPU
+			);
+
+			// RootParameter[3]
+			// 通常RootSignatureにはDirectionalLightが必要
+			// SpriteではlightingTypeがkNoneなので実際の計算には使わない
+			commandList->SetGraphicsRootConstantBufferView(
+				3,
+				directionalLightResource->
+				GetGPUVirtualAddress()
+			);
+
+			commandList->DrawIndexedInstanced(
+				6,
+				1,
+				0,
+				0,
+				0
+			);
+		}
 
 #ifdef USE_IMGUI
-			// 実際のcommandListのImGuiの描画コマンドを積む
-			ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
+		// 実際のcommandListのImGuiの描画コマンドを積む
+		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
 #endif
 
-			// ==========================================
-			// RENDER_TARGET → PRESENT
-			// ==========================================
+		// ==========================================
+		// RENDER_TARGET → PRESENT
+		// ==========================================
 
-			barrier.Transition.StateBefore =
-				D3D12_RESOURCE_STATE_RENDER_TARGET;
+		barrier.Transition.StateBefore =
+			D3D12_RESOURCE_STATE_RENDER_TARGET;
 
-			barrier.Transition.StateAfter =
-				D3D12_RESOURCE_STATE_PRESENT;
+		barrier.Transition.StateAfter =
+			D3D12_RESOURCE_STATE_PRESENT;
 
-			commandList->ResourceBarrier(1, &barrier);
+		commandList->ResourceBarrier(1, &barrier);
 
-			// ==========================================
-			// コマンドリスト終了
-			// ==========================================
+		// ==========================================
+		// コマンドリスト終了
+		// ==========================================
 
-			hr = commandList->Close();
-			assert(SUCCEEDED(hr));
+		hr = commandList->Close();
+		assert(SUCCEEDED(hr));
 
-			// ==========================================
-			// コマンド実行
-			// ==========================================
+		// ==========================================
+		// コマンド実行
+		// ==========================================
 
-			ID3D12CommandList* commandLists[] = {
-				commandList
-			};
+		ID3D12CommandList* commandLists[] = {
+			commandList
+		};
 
-			commandQueue->ExecuteCommandLists(
-				1,
-				commandLists
-			);
+		commandQueue->ExecuteCommandLists(
+			1,
+			commandLists
+		);
 
-			// ==========================================
-			// 画面表示
-			// ==========================================
+		// ==========================================
+		// 画面表示
+		// ==========================================
 
-			hr = swapChain->Present(1, 0);
-			assert(SUCCEEDED(hr));
+		hr = swapChain->Present(1, 0);
+		assert(SUCCEEDED(hr));
 
-			// ==========================================
-			// Fenceシグナル送信
-			// ==========================================
+		// ==========================================
+		// Fenceシグナル送信
+		// ==========================================
 
-			fenceValue++;
+		fenceValue++;
 
-			hr = commandQueue->Signal(
-				fence.Get(),
-				fenceValue
-			);
+		hr = commandQueue->Signal(
+			fence.Get(),
+			fenceValue
+		);
 
-			assert(SUCCEEDED(hr));
-		}
+		assert(SUCCEEDED(hr));
 	}
 
 
@@ -5239,7 +5174,7 @@ int WINAPI WinMain(
 
 #endif
 
-	DestroyWindow(hwnd);
+	winApp.Finalize();
 
 	input->Finalize();
 
