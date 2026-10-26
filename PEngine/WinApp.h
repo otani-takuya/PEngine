@@ -39,6 +39,11 @@ public:
 		return hasProcessedMessage_;
 	}
 
+	// アプリケーションインスタンスを取得
+	HINSTANCE GetHInstance() const {
+		return wc_.hInstance;
+	}
+
 private:
 
 	static LRESULT CALLBACK WindowProc(

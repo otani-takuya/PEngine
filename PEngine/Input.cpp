@@ -1,6 +1,7 @@
 #include "Input.h"
 
 #include <algorithm>
+#include "WinApp.h"
 #include <cassert>
 #include <cmath>
 #include <cstring>
@@ -9,9 +10,16 @@
 // 初期化
 // ==============================
 void Input::Initialize(
-	HINSTANCE hInstance,
-	HWND hwnd
+	WinApp* winApp
 ) {
+
+	// WinAppが有効か確認
+	assert(winApp != nullptr);
+
+	// WinAppからWindowsの情報を取得
+	HINSTANCE hInstance = winApp->GetHInstance();
+	HWND hwnd = winApp->GetHwnd();
+
 	// DirectInput本体を生成
 	HRESULT hr = DirectInput8Create(
 		hInstance,

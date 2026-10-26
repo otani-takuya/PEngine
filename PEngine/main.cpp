@@ -20,7 +20,6 @@
 
 #include "Matrix.h"
 
-#include<fstream>
 #include<sstream>
 
 #include <xaudio2.h>
@@ -1792,17 +1791,15 @@ int WINAPI WinMain(
 	//比較関数はLessEqual。近いものほど前に表示される
 	depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
-	// ==========================================
-	// 入力処理初期化処理
-	// ==========================================
+	// ==============================
+	// Input初期化
+	// ==============================
 
+	// Inputインスタンス生成
 	Input* input = new Input();
 
-	input->Initialize(
-		hInstance,
-		hwnd
-	);
-
+	// WinAppのポインタを渡して初期化
+	input->Initialize(&winApp);
 
 	//==============================
 	// 球生成用
@@ -5879,13 +5876,22 @@ int WINAPI WinMain(
 
 #endif
 
-	winApp.Finalize();
+	// ==============================
+	// Input終了処理
+	// ==============================
 
 	input->Finalize();
 
 	delete input;
 	input = nullptr;
 
+	// ==============================
+	// WinApp終了処理
+	// ==============================
+
+	winApp.Finalize();
+
+	// COM終了
 	CoUninitialize();
 
 	return 0;

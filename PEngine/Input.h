@@ -19,10 +19,12 @@ struct GamePadStick {
 	float y;
 };
 
+class WinApp;
+
 class Input {
 public:
-	// DirectInput・キーボードを初期化
-	void Initialize(HINSTANCE hInstance, HWND hwnd);
+	// WinAppからウィンドウ情報を受け取って初期化
+	void Initialize(WinApp* winApp);
 
 	// 毎フレーム呼ぶ
 	void Update();
