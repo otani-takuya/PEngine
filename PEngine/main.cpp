@@ -20,6 +20,7 @@
 
 #include "Matrix.h"
 
+#include<fstream>
 #include<sstream>
 
 #include <xaudio2.h>
@@ -69,6 +70,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 #include "Input.h"
 #include "WinApp.h"
 #include "DirectXCommon.h"
+#include "FrameRateController.h"
 
 DebugCamera* gDebugCamera = nullptr;
 
@@ -359,7 +361,7 @@ IDxcBlob* CompileShader(
 	//シェーダーをコンパイルする旨をログに出す
 	Log(ConvertString(std::format(L"Begin CompileShader, path!{}, profile;{}\n", filePath, profile)));
 	//hlslファイルを読む
-	IDxcBlobEncoding* shaderSource = nullptr;
+	Microsoft::WRL::ComPtr<IDxcBlobEncoding> shaderSource;
 	HRESULT hr = dxcUtils->LoadFile(
 		filePath.c_str(),
 		nullptr,
@@ -383,7 +385,7 @@ IDxcBlob* CompileShader(
 		L"-Zpr", //行優先のメモリレイアウト
 	};
 	//Compileする
-	IDxcResult* ShaderResult = nullptr;
+	Microsoft::WRL::ComPtr<IDxcResult> ShaderResult;
 
 	hr = dxcCompiler->Compile(
 		&shaderSourceBuffer,		//コンパイルするソースコード
@@ -397,7 +399,7 @@ IDxcBlob* CompileShader(
 	assert(SUCCEEDED(hr));
 
 	//3,警告やエラーの確認
-	IDxcBlobUtf8* shaderError = nullptr;
+	Microsoft::WRL::ComPtr<IDxcBlobUtf8> shaderError;
 	ShaderResult->GetOutput(
 		DXC_OUT_ERRORS,
 		IID_PPV_ARGS(&shaderError),
@@ -412,7 +414,7 @@ IDxcBlob* CompileShader(
 	}
 
 	//4,Compile結果を受け取って返す
-	IDxcBlob* shaderBlob = nullptr;
+	Microsoft::WRL::ComPtr<IDxcBlob> shaderBlob;
 	hr = ShaderResult->GetOutput(
 		DXC_OUT_OBJECT,
 		IID_PPV_ARGS(&shaderBlob),
@@ -421,11 +423,9 @@ IDxcBlob* CompileShader(
 	assert(SUCCEEDED(hr));
 	//成功したログを出す
 	Log(ConvertString(std::format(L"Compile Succeeded!, path!{}, profile;{}\n", filePath, profile)));
-	//もう使わないリソースを解放
-	shaderSource->Release();
-	ShaderResult->Release();
-	//実行用バイナリを返す
-	return shaderBlob;
+	// 一時オブジェクトはComPtrが自動解放する。
+	// 戻り値は既存のCompileShader呼び出しに合わせて所有権を移す。
+	return shaderBlob.Detach();
 
 
 }
@@ -1282,64 +1282,80 @@ int WINAPI WinMain(
 
 
 	// ==============================
-	// DirectXCommon初期化
+	// DXGIファクトリ生成
 	// ==============================
 
-	// DirectX12の基本管理クラス
-	DirectXCommon dxCommon;
+	Microsoft::WRL::ComPtr<IDXGIFactory7> factory = nullptr;
 
-	// Factory、Adapter、Device、Commandを生成
-	bool dxInitialized =
-		dxCommon.Initialize(&winApp, logStream);
-	assert(dxInitialized);
+	HRESULT hr = CreateDXGIFactory(
+		IID_PPV_ARGS(&factory)
+	);
 
-	if (!dxInitialized) {
-		return -1;
+	assert(SUCCEEDED(hr));
+
+
+	// ==============================
+	// GPUアダプタ取得
+	// ==============================
+
+	Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter = nullptr;
+
+	for (
+		UINT i = 0;
+		factory->EnumAdapterByGpuPreference(
+			i,
+			DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+			IID_PPV_ARGS(&adapter)
+		) != DXGI_ERROR_NOT_FOUND;
+		++i
+		) {
+
+		DXGI_ADAPTER_DESC3 desc{};
+
+		adapter->GetDesc3(&desc);
+
+		if (!(desc.Flags & DXGI_ADAPTER_FLAG3_SOFTWARE)) {
+
+			Log(
+				logStream,
+				ConvertString(
+					std::format(
+						L"Use Adapter : {}",
+						desc.Description
+					)
+				)
+			);
+
+			break;
+		}
+
+		adapter = nullptr;
 	}
 
-	// ==============================
-	// DirectX12オブジェクト取得
-	// ==============================
-
-	// DirectXCommonが所有しているオブジェクトを取得
-	// ここではReleaseしない
-
-	IDXGIFactory7* factory = dxCommon.GetFactory();
-
-	IDXGIAdapter4* adapter = dxCommon.GetAdapter();
-
-	ID3D12Device* device = dxCommon.GetDevice();
-
-	ID3D12CommandQueue* commandQueue =
-		dxCommon.GetCommandQueue();
-
-	ID3D12CommandAllocator* commandAllocator =
-		dxCommon.GetCommandAllocator();
-
-	ID3D12GraphicsCommandList* commandList =
-		dxCommon.GetCommandList();
-
-	// 以降の既存処理で使用するHRESULT
-	HRESULT hr = S_OK;
+	assert(adapter != nullptr);
 
 	// ==============================
 	// DXC初期化
 	// ==============================
 
-	IDxcUtils* dxcUtils = nullptr;
-	IDxcCompiler3* dxcCompiler = nullptr;
+	Microsoft::WRL::ComPtr<IDxcUtils> dxcUtilsOwner;
+	IDxcUtils* dxcUtils = nullptr; // 非所有参照。所有権はdxcUtilsOwnerが管理
+	Microsoft::WRL::ComPtr<IDxcCompiler3> dxcCompilerOwner;
+	IDxcCompiler3* dxcCompiler = nullptr; // 非所有参照。所有権はdxcCompilerOwnerが管理
 
 	hr = DxcCreateInstance(
 		CLSID_DxcUtils,
-		IID_PPV_ARGS(&dxcUtils)
+		IID_PPV_ARGS(&dxcUtilsOwner)
 	);
 	assert(SUCCEEDED(hr));
+	dxcUtils = dxcUtilsOwner.Get();
 
 	hr = DxcCreateInstance(
 		CLSID_DxcCompiler,
-		IID_PPV_ARGS(&dxcCompiler)
+		IID_PPV_ARGS(&dxcCompilerOwner)
 	);
 	assert(SUCCEEDED(hr));
+	dxcCompiler = dxcCompilerOwner.Get();
 
 	//現時点でincludeはしないが、includeに対応するための設定を行っておく
 	Microsoft::WRL::ComPtr<IDxcIncludeHandler> dxcIncludeHandler = nullptr;
@@ -1348,6 +1364,54 @@ int WINAPI WinMain(
 		&dxcIncludeHandler
 	);
 	assert(SUCCEEDED(hr));
+
+
+	// ==============================
+	// D3D12デバイス生成
+	// ==============================
+
+	Microsoft::WRL::ComPtr<ID3D12Device> device = nullptr;
+
+	D3D_FEATURE_LEVEL featureLevels[] = {
+		D3D_FEATURE_LEVEL_12_2,
+		D3D_FEATURE_LEVEL_12_1,
+		D3D_FEATURE_LEVEL_12_0
+	};
+
+	const char* featureLevelStrings[] = {
+		"12.2",
+		"12.1",
+		"12.0"
+	};
+
+	for (size_t i = 0; i < _countof(featureLevels); ++i) {
+
+		hr = D3D12CreateDevice(
+			adapter.Get(),
+			featureLevels[i],
+			IID_PPV_ARGS(&device)
+		);
+
+		if (SUCCEEDED(hr)) {
+
+			Log(
+				logStream,
+				std::format(
+					"Feature Level {} supported",
+					featureLevelStrings[i]
+				)
+			);
+
+			break;
+		}
+	}
+
+	assert(device != nullptr);
+
+
+	// DepthstencilTextureをウィンドウのサイズで作成
+	Microsoft::WRL::ComPtr<ID3D12Resource> depthStencilResource
+		= CreateDepthStencilTextureResource(device.Get(), kClientWidth, kClientHeight);
 
 
 	// ==========================================
@@ -1402,11 +1466,16 @@ int WINAPI WinMain(
 	descriptionRootSignature.NumParameters = _countof(rootParameters);		// ルートパラメータの数
 
 	// シリアライズしてバイナリにする
-	ID3DBlob* signatureBlob = nullptr; ID3DBlob* errorBlob = nullptr;
+	Microsoft::WRL::ComPtr<ID3DBlob> signatureBlobOwner;
+	Microsoft::WRL::ComPtr<ID3DBlob> errorBlobOwner;
+	ID3DBlob* signatureBlob = nullptr;
+	ID3DBlob* errorBlob = nullptr;
 	hr = D3D12SerializeRootSignature(&descriptionRootSignature,
-		D3D_ROOT_SIGNATURE_VERSION_1, &signatureBlob, &errorBlob);
+		D3D_ROOT_SIGNATURE_VERSION_1, &signatureBlobOwner, &errorBlobOwner);
+	signatureBlob = signatureBlobOwner.Get();
+	errorBlob = errorBlobOwner.Get();
 	if (FAILED(hr)) {
-		Log(reinterpret_cast<char*>(errorBlob->GetBufferPointer()));
+		if (errorBlob) { Log(reinterpret_cast<char*>(errorBlob->GetBufferPointer())); }
 		assert(false);
 	}
 	// バイナリを元に生成
@@ -1720,7 +1789,8 @@ int WINAPI WinMain(
 	graphicsPipelineStateDesc.SampleDesc.Count = 1;
 	graphicsPipelineStateDesc.SampleMask = D3D12_DEFAULT_SAMPLE_MASK;
 	// 実際に生成
-	ID3D12PipelineState* graphicsPipelineState = nullptr;
+	Microsoft::WRL::ComPtr<ID3D12PipelineState> graphicsPipelineStateOwner;
+	ID3D12PipelineState* graphicsPipelineState = nullptr; // 非所有参照。所有権はgraphicsPipelineStateOwnerが管理
 
 
 	//DepthStencil用のPSOも生成する。
@@ -1732,15 +1802,15 @@ int WINAPI WinMain(
 	//比較関数はLessEqual。近いものほど前に表示される
 	depthStencilDesc.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
-	// ==============================
-	// Input初期化
-	// ==============================
+	// ========================================
+	// 入力処理の初期化
+	// ========================================
 
-	// Inputインスタンス生成
 	Input* input = new Input();
 
-	// WinAppのポインタを渡して初期化
+	// WinAppのアドレスを渡して初期化
 	input->Initialize(&winApp);
+
 
 	//==============================
 	// 球生成用
@@ -1750,7 +1820,7 @@ int WINAPI WinMain(
 	// 球専用の頂点リソース
 	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceSphere =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(VertexData) * kVertexCount
 		);
 
@@ -1807,7 +1877,7 @@ int WINAPI WinMain(
 
 	// Meshごとに独立したVertexBufferを作成
 	CreateMeshVertexBuffers(
-		device,
+		device.Get(),
 		modelDataMultiMesh
 	);
 
@@ -1825,7 +1895,7 @@ int WINAPI WinMain(
 	assert(!modelDataMultiMaterial.materials.empty());
 
 	CreateMeshVertexBuffers(
-		device,
+		device.Get(),
 		modelDataMultiMaterial
 	);
 
@@ -1845,7 +1915,7 @@ int WINAPI WinMain(
 	// ==============================
 	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourcePlane =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(VertexData) * modelDataPlane.vertices.size()
 		);
 
@@ -1854,7 +1924,7 @@ int WINAPI WinMain(
 	// ==============================
 	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceTeapot =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(VertexData) * modelDataTeapot.vertices.size()
 		);
 
@@ -1864,7 +1934,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		vertexResourceBunny =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(VertexData) *
 			modelDataBunny.vertices.size()
 		);
@@ -1875,7 +1945,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		vertexResourceFence =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(VertexData) *
 			modelDataFence.vertices.size()
 		);
@@ -1885,21 +1955,21 @@ int WINAPI WinMain(
 	// ==============================
 	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceSuzanne =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(VertexDataNoUV) * modelDataSuzanne.size()
 		);
 
 
 	//indexResourceSpriteの生成
 	Microsoft::WRL::ComPtr<ID3D12Resource> indexResourceSprite =
-		CreateBufferResource(device, sizeof(uint32_t) * 6);
+		CreateBufferResource(device.Get(), sizeof(uint32_t) * 6);
 
 	// ==============================
 	// Plane用WVP Resource
 	// ==============================
 	Microsoft::WRL::ComPtr<ID3D12Resource> wvpResourcePlane =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(TransformationMatrix)
 		);
 
@@ -1908,7 +1978,7 @@ int WINAPI WinMain(
 	// ==============================
 	Microsoft::WRL::ComPtr<ID3D12Resource> wvpResourceSphere =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(TransformationMatrix)
 		);
 
@@ -1917,7 +1987,7 @@ int WINAPI WinMain(
 	// ==============================
 	Microsoft::WRL::ComPtr<ID3D12Resource> wvpResourceTeapot =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(TransformationMatrix)
 		);
 
@@ -1928,7 +1998,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		wvpResourceBunny =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(TransformationMatrix)
 		);
 
@@ -1941,7 +2011,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		wvpResourceMultiMesh =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(TransformationMatrix)
 		);
 
@@ -1953,7 +2023,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		wvpResourceMultiMaterial =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(TransformationMatrix)
 		);
 
@@ -1965,14 +2035,14 @@ int WINAPI WinMain(
 	// ==============================
 	Microsoft::WRL::ComPtr<ID3D12Resource> wvpResourceSuzanne =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(TransformationMatrix)
 		);
 
 	TransformationMatrix* wvpDataSuzanne = nullptr;
 
 	//平行光源用のResourceの生成
-	Microsoft::WRL::ComPtr<ID3D12Resource> directionalLightResource = CreateBufferResource(device, sizeof(DirectionalLight));
+	Microsoft::WRL::ComPtr<ID3D12Resource> directionalLightResource = CreateBufferResource(device.Get(), sizeof(DirectionalLight));
 
 	DirectionalLight* directionalLightData = nullptr;
 
@@ -1981,8 +2051,9 @@ int WINAPI WinMain(
 	graphicsPipelineStateDesc.DSVFormat = DXGI_FORMAT_D24_UNORM_S8_UINT;
 
 	hr = device->CreateGraphicsPipelineState(&graphicsPipelineStateDesc,
-		IID_PPV_ARGS(&graphicsPipelineState));
+		IID_PPV_ARGS(&graphicsPipelineStateOwner));
 	assert(SUCCEEDED(hr));
+	graphicsPipelineState = graphicsPipelineStateOwner.Get();
 
 
 	// ==========================================
@@ -2149,7 +2220,7 @@ int WINAPI WinMain(
 	assert(SUCCEEDED(hr));
 
 	//Sprite用の頂点リソースを作る
-	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceSprite = CreateBufferResource(device, sizeof(VertexData) * 6);
+	Microsoft::WRL::ComPtr<ID3D12Resource> vertexResourceSprite = CreateBufferResource(device.Get(), sizeof(VertexData) * 6);
 
 	//頂点バッファビューを作成する
 	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewSprite{};
@@ -2161,7 +2232,7 @@ int WINAPI WinMain(
 	vertexBufferViewSprite.StrideInBytes = sizeof(VertexData);
 
 	//Sprite用のtransformationMatrix用のリソースを作る。Matrix4x4 1つ分のサイズを用意
-	Microsoft::WRL::ComPtr<ID3D12Resource> transformationMatrixResourceSprite = CreateBufferResource(device, sizeof(TransformationMatrix));
+	Microsoft::WRL::ComPtr<ID3D12Resource> transformationMatrixResourceSprite = CreateBufferResource(device.Get(), sizeof(TransformationMatrix));
 	// データを書き込む
 	Matrix4x4* transformationMatrixDataSprite = nullptr;
 	// 書き込むためのアドレスを取得
@@ -2171,7 +2242,7 @@ int WINAPI WinMain(
 
 	// Sprite用Material
 	Microsoft::WRL::ComPtr<ID3D12Resource> materialResourceSprite =
-		CreateBufferResource(device, sizeof(Material));
+		CreateBufferResource(device.Get(), sizeof(Material));
 
 	Material* materialDataSprite = nullptr;
 
@@ -2192,7 +2263,7 @@ int WINAPI WinMain(
 	// MaterialResourceの生成
 	// ==========================================
 	Microsoft::WRL::ComPtr<ID3D12Resource> materialResource =
-		CreateBufferResource(device, sizeof(Material));
+		CreateBufferResource(device.Get(), sizeof(Material));
 	// Materialデータを書き込む
 	Material* materialData = nullptr;
 	TransformationMatrix* wvpDataPlane = nullptr;
@@ -2215,7 +2286,7 @@ int WINAPI WinMain(
 	// Suzanne専用MaterialResource
 	// ==========================================
 	Microsoft::WRL::ComPtr<ID3D12Resource> materialResourceSuzanne =
-		CreateBufferResource(device, sizeof(Material));
+		CreateBufferResource(device.Get(), sizeof(Material));
 
 	Material* materialDataSuzanne = nullptr;
 
@@ -2456,7 +2527,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		wvpResourceFence =
 		CreateBufferResource(
-			device,
+			device.Get(),
 			sizeof(TransformationMatrix)
 		);
 
@@ -2683,7 +2754,7 @@ int WINAPI WinMain(
 
 #ifdef _DEBUG
 
-	ID3D12InfoQueue* infoQueue = nullptr;
+	Microsoft::WRL::ComPtr<ID3D12InfoQueue> infoQueue;
 
 	if (SUCCEEDED(
 		device->QueryInterface(
@@ -2724,64 +2795,80 @@ int WINAPI WinMain(
 
 		infoQueue->PushStorageFilter(&filter);
 
-		infoQueue->Release();
-		infoQueue = nullptr;
+		// ComPtrにより自動解放される
 	}
 
-
-	// ==============================
-	// SwapChain・RTV・DSV
-	// DirectXCommonから取得
-	// ==============================
-
-	// SwapChainを取得
-	IDXGISwapChain4* swapChain =
-		dxCommon.GetSwapChain();
-
-	// RTV用DescriptorHeapを取得
-	ID3D12DescriptorHeap* rtvHeap =
-		dxCommon.GetRTVHeap();
-
-	// DSV用DescriptorHeapを取得
-	ID3D12DescriptorHeap* dsvHeap =
-		dxCommon.GetDSVHeap();
-
-	// DepthBufferを取得
-	ID3D12Resource* depthStencilResource =
-		dxCommon.GetDepthStencilResource();
-
-	// ==============================
-	// SRVヒープ生成
-	// ==============================
-
-	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap>
-		srvDescriptorheap = CreateDescriptorHeap(
-			device,
-			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-			128,
-			true
-		);
-
-	// ==============================
-	// DescriptorSize
-	// ==============================
-
-	// SRV用DescriptorSize
-	const uint32_t descriptorSizeSRV =
-		device->GetDescriptorHandleIncrementSize(
-			D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
-		);
-
-	// RTV用DescriptorSize
-	const uint32_t descriptorSizeRTV =
-		dxCommon.GetRTVDescriptorSize();
-
-	// DSV用DescriptorSize
-	const uint32_t descriptorSizeDSV =
-		dxCommon.GetDSVDescriptorSize();
-
-
 #endif
+
+
+	// ==============================
+	// コマンドキュー生成
+	// ==============================
+
+	Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueueOwner;
+	ID3D12CommandQueue* commandQueue = nullptr; // 非所有参照。所有権はcommandQueueOwnerが管理
+
+	D3D12_COMMAND_QUEUE_DESC queueDesc{};
+
+	hr = device->CreateCommandQueue(
+		&queueDesc,
+		IID_PPV_ARGS(&commandQueueOwner)
+	);
+
+	assert(SUCCEEDED(hr));
+	commandQueue = commandQueueOwner.Get();
+
+
+	// ==============================
+	// コマンドアロケータ生成
+	// ==============================
+
+	Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocatorOwner;
+	ID3D12CommandAllocator* commandAllocator = nullptr; // 非所有参照。所有権はcommandAllocatorOwnerが管理
+
+	hr = device->CreateCommandAllocator(
+		D3D12_COMMAND_LIST_TYPE_DIRECT,
+		IID_PPV_ARGS(&commandAllocatorOwner)
+	);
+
+	assert(SUCCEEDED(hr));
+	commandAllocator = commandAllocatorOwner.Get();
+
+
+	// ==============================
+	// コマンドリスト生成
+	// ==============================
+
+	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandListOwner;
+	ID3D12GraphicsCommandList* commandList = nullptr; // 非所有参照。所有権はcommandListOwnerが管理
+
+	hr = device->CreateCommandList(
+		0,
+		D3D12_COMMAND_LIST_TYPE_DIRECT,
+		commandAllocator,
+		nullptr,
+		IID_PPV_ARGS(&commandListOwner)
+	);
+
+	assert(SUCCEEDED(hr));
+	commandList = commandListOwner.Get();
+
+
+	// ========================================
+	// STEP 2-4-9 : フレーム用リソースをDirectXCommonへ移管
+	// ========================================
+	DirectXCommon dxCommon;
+	const bool frameInitialized = dxCommon.InitializeFrameResources(
+		factory.Get(), device.Get(), commandQueue, commandAllocator,
+		commandList, hwnd, kClientWidth, kClientHeight, depthStencilResource.Get());
+	assert(frameInitialized);
+	if (!frameInitialized) return -1;
+
+	// SRVは引き続きmain.cppが管理（STEP 2-5で整理）
+	Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> srvDescriptorheap = CreateDescriptorHeap(
+		device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 128, true);
+	const uint32_t descriptorSizeSRV = device->GetDescriptorHandleIncrementSize(
+		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
 	// ==============================
 	// Texture読み込み
@@ -2798,7 +2885,7 @@ int WINAPI WinMain(
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> textureResource =
 		CreateTextureResource(
-			device,
+			device.Get(),
 			metadata
 		);
 
@@ -2806,7 +2893,7 @@ int WINAPI WinMain(
 		UploadTextureData(
 			textureResource.Get(),
 			mipImages,
-			device,
+			device.Get(),
 			commandList
 		);
 
@@ -2823,7 +2910,7 @@ int WINAPI WinMain(
 
 	Microsoft::WRL::ComPtr<ID3D12Resource> textureResource2 =
 		CreateTextureResource(
-			device,
+			device.Get(),
 			metadata2
 		);
 
@@ -2831,7 +2918,7 @@ int WINAPI WinMain(
 		UploadTextureData(
 			textureResource2.Get(),
 			mipImages2,
-			device,
+			device.Get(),
 			commandList
 		);
 
@@ -2849,7 +2936,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		textureResourceTeapot =
 		CreateTextureResource(
-			device,
+			device.Get(),
 			metadataTeapot
 		);
 
@@ -2858,7 +2945,7 @@ int WINAPI WinMain(
 		UploadTextureData(
 			textureResourceTeapot.Get(),
 			mipImagesTeapot,
-			device,
+			device.Get(),
 			commandList
 		);
 
@@ -2876,7 +2963,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		textureResourceBunny =
 		CreateTextureResource(
-			device,
+			device.Get(),
 			metadataBunny
 		);
 
@@ -2885,7 +2972,7 @@ int WINAPI WinMain(
 		UploadTextureData(
 			textureResourceBunny.Get(),
 			mipImagesBunny,
-			device,
+			device.Get(),
 			commandList
 		);
 
@@ -2903,7 +2990,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		textureResourceFence =
 		CreateTextureResource(
-			device,
+			device.Get(),
 			metadataFence
 		);
 
@@ -2912,7 +2999,7 @@ int WINAPI WinMain(
 		UploadTextureData(
 			textureResourceFence.Get(),
 			mipImagesFence,
-			device,
+			device.Get(),
 			commandList
 		);
 
@@ -2930,7 +3017,7 @@ int WINAPI WinMain(
 	Microsoft::WRL::ComPtr<ID3D12Resource>
 		textureResourceMonsterBall =
 		CreateTextureResource(
-			device,
+			device.Get(),
 			metadataMonsterBall
 		);
 
@@ -2939,7 +3026,7 @@ int WINAPI WinMain(
 		UploadTextureData(
 			textureResourceMonsterBall.Get(),
 			mipImagesMonsterBall,
-			device,
+			device.Get(),
 			commandList
 		);
 
@@ -3219,22 +3306,6 @@ int WINAPI WinMain(
 		textureSrvHandleCPUFence
 	);
 
-
-	// ==============================
-	// RTV・DSVハンドル取得
-	// ==============================
-
-	// バックバッファ2枚分のRTVハンドル
-	D3D12_CPU_DESCRIPTOR_HANDLE rtvHandles[2] = {
-		dxCommon.GetRTVHandle(0),
-		dxCommon.GetRTVHandle(1)
-	};
-
-	// DSVハンドル
-	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle =
-		dxCommon.GetDSVHandle();
-
-
 	// ==========================================
 	// ParticleManager初期化
 	// ==========================================
@@ -3243,9 +3314,8 @@ int WINAPI WinMain(
 
 	ParticleManager::InitializeInfo particleInfo{};
 
-	particleInfo.device = device;
+	particleInfo.device = device.Get();
 
-	// SRV用DescriptorHeapをParticleManagerに渡す
 	particleInfo.srvHeap = srvDescriptorheap.Get();
 	particleInfo.srvDescriptorSize = descriptorSizeSRV;
 	particleInfo.instancingSrvIndex = 7;
@@ -3289,42 +3359,29 @@ int WINAPI WinMain(
 
 
 
-
-
-
 #ifdef USE_IMGUI
-
+	//imGuiの初期化
+	//こういうものとしてとらえる
 	IMGUI_CHECKVERSION();
-
 	ImGui::CreateContext();
 	ImGui::StyleColorsDark();
-
 	ImGui_ImplWin32_Init(hwnd);
-
-	ImGui_ImplDX12_Init(
-		device,
+	ImGui_ImplDX12_Init(device.Get(),
 		dxCommon.GetBackBufferCount(),
-		DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+		dxCommon.GetRTVFormat(),
 		srvDescriptorheap.Get(),
-		srvDescriptorheap->
-		GetCPUDescriptorHandleForHeapStart(),
-		srvDescriptorheap->
-		GetGPUDescriptorHandleForHeapStart()
-	);
-
+		srvDescriptorheap->GetCPUDescriptorHandleForHeapStart(),
+		srvDescriptorheap->GetGPUDescriptorHandleForHeapStart());
+	ImGuiIO& io = ImGui::GetIO();
+	io.Fonts->Build();
 #endif
 
-	// ==============================
-	// 初期化時のGPU同期
-	// ==============================
+	// ==========================================
+	// 初期テクスチャ転送コマンドを実行
+	// ==========================================
 
-	// GPUへFenceシグナルを送信
-	bool signalResult = dxCommon.SignalFence();
-	assert(signalResult);
-
-	// GPUの完了を待つ
-	bool waitResult = dxCommon.WaitForGPU();
-	assert(waitResult);
+	// テクスチャアップロードの完了を待機
+	assert(dxCommon.SignalAndWait());
 
 	// ==========================================
 	// XAudio2の初期化
@@ -3499,7 +3556,8 @@ int WINAPI WinMain(
 	// ==========================================
 	// Particle更新時間
 	// ==========================================
-	const float deltaTime = 1.0f / 60.0f;
+	FrameRateController frameRateController;
+	const float deltaTime = frameRateController.GetFixedDeltaTime();
 
 	// ==========================================
 	// Particle生成用ImGui変数
@@ -3559,15 +3617,9 @@ int WINAPI WinMain(
 			continue;
 		}
 
+		// フレーム時間の計測開始
+		frameRateController.BeginFrame();
 
-		// ==============================
-		// GPU処理完了待機
-		// ==============================
-
-		// 前回送信したコマンドの完了を待つ
-		bool waitResult = dxCommon.WaitForGPU();
-
-		assert(waitResult);
 
 		// ==========================================
 		// キーボード情報の取得
@@ -3627,94 +3679,11 @@ int WINAPI WinMain(
 			debugCamera.Update();
 		}
 
-		// ==========================================
-		// Reset
-		// ==========================================
-
-		hr = commandAllocator->Reset();
-		assert(SUCCEEDED(hr));
-
-		hr = commandList->Reset(
-			commandAllocator,
-			nullptr
-		);
-
-		assert(SUCCEEDED(hr));
-
-
-		// ==========================================
-		// バックバッファ取得
-		// ==========================================
-
-		UINT backBufferIndex =
-			swapChain->GetCurrentBackBufferIndex();
-
-		// ==========================================
-		// PRESENT → RENDER_TARGET
-		// ==========================================
-
-		D3D12_RESOURCE_BARRIER barrier{};
-
-		barrier.Type =
-			D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-
-		barrier.Flags =
-			D3D12_RESOURCE_BARRIER_FLAG_NONE;
-
-		// DirectXCommonから現在のバックバッファを取得
-		barrier.Transition.pResource =
-			dxCommon.GetBackBuffer(backBufferIndex);
-
-		barrier.Transition.StateBefore =
-			D3D12_RESOURCE_STATE_PRESENT;
-
-		barrier.Transition.StateAfter =
-			D3D12_RESOURCE_STATE_RENDER_TARGET;
-
-		barrier.Transition.Subresource =
-			D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-
-		commandList->ResourceBarrier(1, &barrier);
-
-
-
-		// ==========================================
-		// 描画先設定
-		// ==========================================
-
-		commandList->OMSetRenderTargets(
-			1,
-			&rtvHandles[backBufferIndex],
-			false,
-			&dsvHandle
-		);
-
-		commandList->ClearDepthStencilView(
-			dsvHandle,
-			D3D12_CLEAR_FLAG_DEPTH,
-			1.0f,
-			0,
-			0,
-			nullptr
-		);
-
-		// ==========================================
-		// 画面クリア
-		// ==========================================
-
-		float clearColor[] = {
-			0.1f,
-			0.25f,
-			0.5f,
-			1.0f
-		};
-
-		commandList->ClearRenderTargetView(
-			rtvHandles[backBufferIndex],
-			clearColor,
-			0,
-			nullptr
-		);
+		// 描画前処理はDirectXCommonへ集約
+		if (!dxCommon.PreDraw()) {
+			assert(false && "DirectXCommon::PreDraw failed");
+			break;
+		}
 
 		// 描画用のDescriptor Heap の設定
 		ID3D12DescriptorHeap* descriptorHeaps[] = {
@@ -3753,263 +3722,263 @@ int WINAPI WinMain(
 
 #ifdef USE_IMGUI
 
-			if (ImGui::CollapsingHeader(
-				"Particle Settings",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
+		if (ImGui::CollapsingHeader(
+			"Particle Settings",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
 
-				ImGui::Checkbox(
-					"Draw Particle",
-					&isDrawParticle
-				);
-
-				ImGui::SeparatorText("Grid Count");
-
-				ImGui::SliderInt(
-					"Count X",
-					&particleCountX,
-					1,
-					10
-				);
-
-				ImGui::SliderInt(
-					"Count Y",
-					&particleCountY,
-					1,
-					10
-				);
-
-				ImGui::SliderInt(
-					"Count Z",
-					&particleCountZ,
-					1,
-					10
-				);
-
-				ImGui::SeparatorText("Transform");
-
-				ImGui::DragFloat(
-					"Spacing",
-					&particleSpacing,
-					0.01f,
-					0.1f,
-					5.0f
-				);
-
-				ImGui::DragFloat(
-					"Scale",
-					&particleScale,
-					0.01f,
-					0.01f,
-					3.0f
-				);
-
-				ImGui::SeparatorText("Instance Info");
-
-				ImGui::Text(
-					"Instance Count : %u",
-					particleManager.GetInstanceCount()
-				);
-
-				ImGui::Text(
-					"Max Instance : %u",
-					particleManager.GetMaxInstanceCount()
-				);
-
-
-
-				// ==========================================
-				// Billboard設定
-				// ==========================================
-
-				ImGui::SeparatorText("Billboard");
-
-				// Billboardの種類を選択
-				const char* billboardItems[] = {
-					"None",
-					"Spherical",
-					"Cylindrical"
-				};
-
-				ImGui::Combo(
-					"Billboard Type",
-					&billboardType,
-					billboardItems,
-					IM_ARRAYSIZE(billboardItems)
-				);
-
-
-			}
-
-			ImGui::SeparatorText("Particle Life");
-
-			// 現在生存しているParticle数
-			ImGui::Text(
-				"Alive Particles : %u",
-				particleManager.GetParticleCount()
+			ImGui::Checkbox(
+				"Draw Particle",
+				&isDrawParticle
 			);
 
-			// GPUへ送っているインスタンス数
+			ImGui::SeparatorText("Grid Count");
+
+			ImGui::SliderInt(
+				"Count X",
+				&particleCountX,
+				1,
+				10
+			);
+
+			ImGui::SliderInt(
+				"Count Y",
+				&particleCountY,
+				1,
+				10
+			);
+
+			ImGui::SliderInt(
+				"Count Z",
+				&particleCountZ,
+				1,
+				10
+			);
+
+			ImGui::SeparatorText("Transform");
+
+			ImGui::DragFloat(
+				"Spacing",
+				&particleSpacing,
+				0.01f,
+				0.1f,
+				5.0f
+			);
+
+			ImGui::DragFloat(
+				"Scale",
+				&particleScale,
+				0.01f,
+				0.01f,
+				3.0f
+			);
+
+			ImGui::SeparatorText("Instance Info");
+
 			ImGui::Text(
-				"Draw Instances : %u",
+				"Instance Count : %u",
 				particleManager.GetInstanceCount()
 			);
 
-
-			// ==========================================
-			// Particle Emitter設定
-			// ==========================================
-			ImGui::SeparatorText("Particle Emitter");
-
-			// 生成数
-			ImGui::SliderInt(
-				"Emit Count",
-				&emitCount,
-				1,
-				100
-			);
-
-			// 生成位置
-			ImGui::DragFloat3(
-				"Emit Position",
-				emitPosition,
-				0.1f
-			);
-
-			// ==========================================
-			// 初速度
-			// ==========================================
-			ImGui::SeparatorText("Velocity");
-
-			ImGui::DragFloat3(
-				"Velocity Min",
-				emitVelocityMin,
-				0.1f
-			);
-
-			ImGui::DragFloat3(
-				"Velocity Max",
-				emitVelocityMax,
-				0.1f
-			);
-
-			// ==========================================
-			// 重力
-			// ==========================================
-			ImGui::SeparatorText("Acceleration");
-
-			ImGui::DragFloat(
-				"Gravity",
-				&emitGravity,
-				0.1f,
-				-30.0f,
-				30.0f
-			);
-
-			// ==========================================
-			// 寿命
-			// ==========================================
-			ImGui::SeparatorText("Life Time");
-
-			ImGui::DragFloat(
-				"Life Time Min",
-				&emitLifeTimeMin,
-				0.1f,
-				0.01f,
-				10.0f
-			);
-
-			ImGui::DragFloat(
-				"Life Time Max",
-				&emitLifeTimeMax,
-				0.1f,
-				0.01f,
-				10.0f
-			);
-
-			// ==========================================
-			// Particle生成設定を反映
-			// ==========================================
-			ParticleManager::EmitSettings settings{};
-
-			settings.velocityMin = {
-				emitVelocityMin[0],
-				emitVelocityMin[1],
-				emitVelocityMin[2]
-			};
-
-			settings.velocityMax = {
-				emitVelocityMax[0],
-				emitVelocityMax[1],
-				emitVelocityMax[2]
-			};
-
-			settings.gravity = emitGravity;
-
-			settings.lifeTimeMin = emitLifeTimeMin;
-			settings.lifeTimeMax = emitLifeTimeMax;
-
-			particleManager.SetEmitSettings(settings);
-
-			// ==========================================
-			// 生成・削除ボタン
-			// ==========================================
-			if (ImGui::Button("Emit Particles")) {
-
-				// Emitterモードへ切り替え
-				particleManager.SetParticleMode(
-					ParticleManager::ParticleMode::kEmitter
-				);
-
-				// Particleを生成
-				particleManager.Emit(
-					{
-						emitPosition[0],
-						emitPosition[1],
-						emitPosition[2]
-					},
-					static_cast<uint32_t>(emitCount)
-				);
-			}
-
-			ImGui::SameLine();
-
-			if (ImGui::Button("Clear Particles")) {
-				particleManager.ClearParticles();
-			}
-
-			// ==========================================
-			// Particle数の表示
-			// ==========================================
-			ImGui::SeparatorText("Particle Info");
-
 			ImGui::Text(
-				"Alive Particles : %u",
-				particleManager.GetParticleCount()
-			);
-
-			ImGui::Text(
-				"Max Particles : %u",
+				"Max Instance : %u",
 				particleManager.GetMaxInstanceCount()
 			);
+
+
+
+			// ==========================================
+			// Billboard設定
+			// ==========================================
+
+			ImGui::SeparatorText("Billboard");
+
+			// Billboardの種類を選択
+			const char* billboardItems[] = {
+				"None",
+				"Spherical",
+				"Cylindrical"
+			};
+
+			ImGui::Combo(
+				"Billboard Type",
+				&billboardType,
+				billboardItems,
+				IM_ARRAYSIZE(billboardItems)
+			);
+
+
+		}
+
+		ImGui::SeparatorText("Particle Life");
+
+		// 現在生存しているParticle数
+		ImGui::Text(
+			"Alive Particles : %u",
+			particleManager.GetParticleCount()
+		);
+
+		// GPUへ送っているインスタンス数
+		ImGui::Text(
+			"Draw Instances : %u",
+			particleManager.GetInstanceCount()
+		);
+
+
+		// ==========================================
+		// Particle Emitter設定
+		// ==========================================
+		ImGui::SeparatorText("Particle Emitter");
+
+		// 生成数
+		ImGui::SliderInt(
+			"Emit Count",
+			&emitCount,
+			1,
+			100
+		);
+
+		// 生成位置
+		ImGui::DragFloat3(
+			"Emit Position",
+			emitPosition,
+			0.1f
+		);
+
+		// ==========================================
+		// 初速度
+		// ==========================================
+		ImGui::SeparatorText("Velocity");
+
+		ImGui::DragFloat3(
+			"Velocity Min",
+			emitVelocityMin,
+			0.1f
+		);
+
+		ImGui::DragFloat3(
+			"Velocity Max",
+			emitVelocityMax,
+			0.1f
+		);
+
+		// ==========================================
+		// 重力
+		// ==========================================
+		ImGui::SeparatorText("Acceleration");
+
+		ImGui::DragFloat(
+			"Gravity",
+			&emitGravity,
+			0.1f,
+			-30.0f,
+			30.0f
+		);
+
+		// ==========================================
+		// 寿命
+		// ==========================================
+		ImGui::SeparatorText("Life Time");
+
+		ImGui::DragFloat(
+			"Life Time Min",
+			&emitLifeTimeMin,
+			0.1f,
+			0.01f,
+			10.0f
+		);
+
+		ImGui::DragFloat(
+			"Life Time Max",
+			&emitLifeTimeMax,
+			0.1f,
+			0.01f,
+			10.0f
+		);
+
+		// ==========================================
+		// Particle生成設定を反映
+		// ==========================================
+		ParticleManager::EmitSettings settings{};
+
+		settings.velocityMin = {
+			emitVelocityMin[0],
+			emitVelocityMin[1],
+			emitVelocityMin[2]
+		};
+
+		settings.velocityMax = {
+			emitVelocityMax[0],
+			emitVelocityMax[1],
+			emitVelocityMax[2]
+		};
+
+		settings.gravity = emitGravity;
+
+		settings.lifeTimeMin = emitLifeTimeMin;
+		settings.lifeTimeMax = emitLifeTimeMax;
+
+		particleManager.SetEmitSettings(settings);
+
+		// ==========================================
+		// 生成・削除ボタン
+		// ==========================================
+		if (ImGui::Button("Emit Particles")) {
+
+			// Emitterモードへ切り替え
+			particleManager.SetParticleMode(
+				ParticleManager::ParticleMode::kEmitter
+			);
+
+			// Particleを生成
+			particleManager.Emit(
+				{
+					emitPosition[0],
+					emitPosition[1],
+					emitPosition[2]
+				},
+				static_cast<uint32_t>(emitCount)
+			);
+		}
+
+		ImGui::SameLine();
+
+		if (ImGui::Button("Clear Particles")) {
+			particleManager.ClearParticles();
+		}
+
+		// ==========================================
+		// Particle数の表示
+		// ==========================================
+		ImGui::SeparatorText("Particle Info");
+
+		ImGui::Text(
+			"Alive Particles : %u",
+			particleManager.GetParticleCount()
+		);
+
+		ImGui::Text(
+			"Max Particles : %u",
+			particleManager.GetMaxInstanceCount()
+		);
 
 
 #endif
 
 
-			// ==============================
-			// MultiMesh操作
-			// ==============================
-			if (ImGui::CollapsingHeader(
-				"MultiMesh Transform",
-				ImGuiTreeNodeFlags_DefaultOpen
-			)) {
-				ImGui::Text(
-					"Mesh Count : %d",
-					static_cast<int>(
-						modelDataMultiMesh.meshes.size()
-						)
-				);
+		// ==============================
+		// MultiMesh操作
+		// ==============================
+		if (ImGui::CollapsingHeader(
+			"MultiMesh Transform",
+			ImGuiTreeNodeFlags_DefaultOpen
+		)) {
+			ImGui::Text(
+				"Mesh Count : %d",
+				static_cast<int>(
+					modelDataMultiMesh.meshes.size()
+					)
+			);
 
 			for (
 				const MeshData& mesh :
@@ -4830,62 +4799,62 @@ int WINAPI WinMain(
 
 
 
-			// ==========================================
-			// ImGuiの設定をParticleManagerへ反映
-			// ==========================================
+		// ==========================================
+		// ImGuiの設定をParticleManagerへ反映
+		// ==========================================
 
-			particleManager.SetGridSettings(
-				static_cast<uint32_t>(particleCountX),
-				static_cast<uint32_t>(particleCountY),
-				static_cast<uint32_t>(particleCountZ),
-				particleSpacing,
-				particleScale
+		particleManager.SetGridSettings(
+			static_cast<uint32_t>(particleCountX),
+			static_cast<uint32_t>(particleCountY),
+			static_cast<uint32_t>(particleCountZ),
+			particleSpacing,
+			particleScale
+		);
+
+
+
+
+		// ==========================================
+		// Billboard設定をParticleManagerへ反映
+		// ==========================================
+
+		switch (billboardType) {
+
+		case 1:
+			particleManager.SetBillboardType(
+				ParticleManager::BillboardType::kSpherical
 			);
+			break;
 
-
-
-
-			// ==========================================
-			// Billboard設定をParticleManagerへ反映
-			// ==========================================
-
-			switch (billboardType) {
-
-			case 1:
-				particleManager.SetBillboardType(
-					ParticleManager::BillboardType::kSpherical
-				);
-				break;
-
-			case 2:
-				particleManager.SetBillboardType(
-					ParticleManager::BillboardType::kCylindrical
-				);
-				break;
-
-			case 0:
-			default:
-				particleManager.SetBillboardType(
-					ParticleManager::BillboardType::kNone
-				);
-				break;
-			}
-
-
-			// ==========================================
-			// Particle更新
-			// ==========================================
-			particleManager.Update(
-				viewMatrix,
-				projectionMatrix,
-				deltaTime
+		case 2:
+			particleManager.SetBillboardType(
+				ParticleManager::BillboardType::kCylindrical
 			);
+			break;
 
-			// ==============================
-			// Plane WVP
-			// ==============================
-			wvpDataPlane->World =
-				worldMatrixPlane;
+		case 0:
+		default:
+			particleManager.SetBillboardType(
+				ParticleManager::BillboardType::kNone
+			);
+			break;
+		}
+
+
+		// ==========================================
+		// Particle更新
+		// ==========================================
+		particleManager.Update(
+			viewMatrix,
+			projectionMatrix,
+			deltaTime
+		);
+
+		// ==============================
+		// Plane WVP
+		// ==============================
+		wvpDataPlane->World =
+			worldMatrixPlane;
 
 		wvpDataPlane->WVP =
 			Matrix::Multiply(
@@ -5434,29 +5403,29 @@ int WINAPI WinMain(
 		}
 
 
-			// ==========================================
-			// ParticleManagerによる描画
-			// ==========================================
+		// ==========================================
+		// ParticleManagerによる描画
+		// ==========================================
 
-			// 描画ON/OFFを設定
-			particleManager.SetVisible(isDrawParticle);
+		// 描画ON/OFFを設定
+		particleManager.SetVisible(isDrawParticle);
 
-			// Particle描画
-			particleManager.Draw(
-				commandList,
-				vertexBufferViewPlane,
-				static_cast<UINT>(
-					modelDataPlane.vertices.size()
-					),
-				textureSrvHandleGPU
-			);
+		// Particle描画
+		particleManager.Draw(
+			commandList,
+			vertexBufferViewPlane,
+			static_cast<UINT>(
+				modelDataPlane.vertices.size()
+				),
+			textureSrvHandleGPU
+		);
 
 
 
-			// ==========================================
-			// スプライト描画
-			// ==========================================
-			if (isDrawSprite) {
+		// ==========================================
+		// スプライト描画
+		// ==========================================
+		if (isDrawSprite) {
 
 			// Spriteで使用する通常モデル用設定へ確実に戻す
 			commandList->SetGraphicsRootSignature(
@@ -5528,55 +5497,20 @@ int WINAPI WinMain(
 		ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), commandList);
 #endif
 
-		// ==========================================
-		// RENDER_TARGET → PRESENT
-		// ==========================================
+		// 描画後処理はDirectXCommonへ集約
+		if (!dxCommon.PostDraw()) {
+			assert(false && "DirectXCommon::PostDraw failed");
+			break;
+		}
 
-		barrier.Transition.StateBefore =
-			D3D12_RESOURCE_STATE_RENDER_TARGET;
+		// 60FPSを超えないように待機（Presentの垂直同期とも併用）
+		frameRateController.EndFrame();
 
-		barrier.Transition.StateAfter =
-			D3D12_RESOURCE_STATE_PRESENT;
-
-		commandList->ResourceBarrier(1, &barrier);
-
-		// ==========================================
-		// コマンドリスト終了
-		// ==========================================
-
-		hr = commandList->Close();
-		assert(SUCCEEDED(hr));
-
-		// ==========================================
-		// コマンド実行
-		// ==========================================
-
-		ID3D12CommandList* commandLists[] = {
-			commandList
-		};
-
-		commandQueue->ExecuteCommandLists(
-			1,
-			commandLists
-		);
-
-		// ==========================================
-		// 画面表示
-		// ==========================================
-
-		hr = swapChain->Present(1, 0);
-		assert(SUCCEEDED(hr));
-
-		// ==============================
-		// Fenceシグナル送信
-		// ==============================
-
-		// 今回の描画コマンドの完了を追跡
-		bool signalResult = dxCommon.SignalFence();
-
-		assert(signalResult);
 	}
 
+
+	// GPUの描画完了を待つ
+	assert(dxCommon.WaitForGPU());
 
 	// ==============================
 	// GPU終了待機
@@ -5599,65 +5533,22 @@ int WINAPI WinMain(
 	//音声データ解放
 	SoundUnload(&soundData1);
 
+	// FenceEventはDirectXCommon::Finalize()で解放
+
 	Log(logStream, "Application End");
+	dxCommon.Finalize();
 
-	if (graphicsPipelineState) {
-		graphicsPipelineState->Release();
-		graphicsPipelineState = nullptr;
-	}
-
-	if (signatureBlob) {
-		signatureBlob->Release();
-		signatureBlob = nullptr;
-	}
-
-	if (errorBlob) {
-		errorBlob->Release();
-		errorBlob = nullptr;
-	}
-
-	// DxcCompiler
-	if (dxcCompiler) {
-		dxcCompiler->Release();
-		dxcCompiler = nullptr;
-	}
-
-	// DxcUtils
-	if (dxcUtils) {
-		dxcUtils->Release();
-		dxcUtils = nullptr;
-	}
-
-#ifdef _DEBUG
-
-	if (infoQueue) {
-		infoQueue->Release();
-		infoQueue = nullptr;
-	}
-
-
-#endif
-
-	// ==============================
-	// Input終了処理
-	// ==============================
+	// DirectX12/DXCのCOMオブジェクトはComPtrがスコープ終了時に解放する。
+	// rawポインタのaliasに対してRelease()を呼ばない。
 
 	input->Finalize();
 
 	delete input;
 	input = nullptr;
 
-	// ==============================
-	// WinApp終了処理
-	// ==============================
-
 	winApp.Finalize();
 
-	dxCommon.Finalize();
-
-	// COM終了
 	CoUninitialize();
-
 
 	return 0;
 }

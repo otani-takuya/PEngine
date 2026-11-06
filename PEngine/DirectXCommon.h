@@ -1,16 +1,12 @@
 
 #pragma once
 
-#include <Windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <wrl.h>
 
-#include <cassert>
 #include <ostream>
 #include <cstdint>
-
-class WinApp;
 
 // ==============================
 // DirectX12共通管理クラス
@@ -23,13 +19,23 @@ public:
     // ==============================
 
     // DXGI、Device、Command関連を初期化
-    bool Initialize(
-        WinApp* winApp,
-        std::ostream& logStream
-    );
+    bool Initialize(std::ostream& logStream);
 
     // DirectX12の基本オブジェクトを解放
     void Finalize();
+
+    // フレーム用リソースを生成。Device/Factory/Queue/Listの所有権は移さない。
+    bool InitializeFrameResources(IDXGIFactory7* factory, ID3D12Device* device,
+        ID3D12CommandQueue* queue, ID3D12CommandAllocator* allocator,
+        ID3D12GraphicsCommandList* list, HWND hwnd, UINT width, UINT height,
+        ID3D12Resource* depthStencil);
+    bool PreDraw();
+    bool PostDraw();
+    bool WaitForGPU();
+    bool SignalAndWait();
+    IDXGISwapChain4* GetSwapChain() const { return swapChain_.Get(); }
+    UINT GetBackBufferCount() const { return kBackBufferCount; }
+    DXGI_FORMAT GetRTVFormat() const { return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB; }
 
     // ==============================
     // Getter
@@ -59,112 +65,6 @@ public:
         return commandList_.Get();
     }
 
-    UINT GetDescriptorSizeRTV() const {
-        return descriptorSizeRTV_;
-    }
-
-    UINT GetDescriptorSizeDSV() const {
-        return descriptorSizeDSV_;
-    }
-
-    // ==============================
-    // SwapChain関連のGetter
-    // ==============================
-
-    // SwapChainを取得
-    IDXGISwapChain4* GetSwapChain() const {
-        return swapChain_.Get();
-    }
-
-    // RTVヒープを取得
-    ID3D12DescriptorHeap* GetRTVHeap() const {
-        return rtvHeap_.Get();
-    }
-
-    // DSVヒープを取得
-    ID3D12DescriptorHeap* GetDSVHeap() const {
-        return dsvHeap_.Get();
-    }
-
-    // バックバッファを取得
-    ID3D12Resource* GetBackBuffer(UINT index) const {
-
-        if (index >= kBackBufferCount) {
-            return nullptr;
-        }
-
-        return swapChainResources_[index].Get();
-    }
-
-    // DepthBufferを取得
-    ID3D12Resource* GetDepthStencilResource() const {
-        return depthStencilResource_.Get();
-    }
-
-    // RTVのDescriptorSizeを取得
-    UINT GetRTVDescriptorSize() const {
-        return descriptorSizeRTV_;
-    }
-
-    // DSVのDescriptorSizeを取得
-    UINT GetDSVDescriptorSize() const {
-        return descriptorSizeDSV_;
-    }
-
-    // バックバッファ数を取得
-    UINT GetBackBufferCount() const {
-        return kBackBufferCount;
-    }
-
-    // ==============================
-    // RTVハンドル取得
-    // ==============================
-    D3D12_CPU_DESCRIPTOR_HANDLE GetRTVHandle(
-        UINT index) const {
-
-        D3D12_CPU_DESCRIPTOR_HANDLE handle{};
-
-        if (!rtvHeap_ || index >= kBackBufferCount) {
-            return handle;
-        }
-
-        handle =
-            rtvHeap_->GetCPUDescriptorHandleForHeapStart();
-
-        handle.ptr +=
-            static_cast<SIZE_T>(index) *
-            descriptorSizeRTV_;
-
-        return handle;
-    }
-
-    // ==============================
-    // DSVハンドル取得
-    // ==============================
-    D3D12_CPU_DESCRIPTOR_HANDLE GetDSVHandle() const {
-
-        if (!dsvHeap_) {
-            return {};
-        }
-
-        return dsvHeap_->
-            GetCPUDescriptorHandleForHeapStart();
-    }
-
-    // ==============================
-    // GPU同期
-    // ==============================
-
-    // GPUへFenceシグナルを送信
-    bool SignalFence();
-
-    // 最後に送信したFence値までGPUの完了を待つ
-    bool WaitForGPU();
-
-    // コマンドを実行してGPUの完了を待つ
-    bool ExecuteCommandListAndWait();
-
-
 private:
 
     // ==============================
@@ -175,6 +75,23 @@ private:
     bool SelectAdapter(std::ostream& logStream);
     bool InitializeDevice(std::ostream& logStream);
     bool InitializeCommand();
+
+    static constexpr UINT kBackBufferCount = 2;
+    Microsoft::WRL::ComPtr<IDXGISwapChain4> swapChain_;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap_;
+    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap_;
+    Microsoft::WRL::ComPtr<ID3D12Resource> backBuffers_[kBackBufferCount];
+    UINT rtvDescriptorSize_ = 0;
+    D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle_{};
+    Microsoft::WRL::ComPtr<ID3D12Fence> fence_;
+    HANDLE fenceEvent_ = nullptr;
+    uint64_t fenceValue_ = 0;
+    // 外部所有
+    ID3D12CommandQueue* frameQueue_ = nullptr;
+    ID3D12CommandAllocator* frameAllocator_ = nullptr;
+    ID3D12GraphicsCommandList* frameList_ = nullptr;
+    UINT frameBackBufferIndex_ = 0;
+    bool isDrawing_ = false;
 
     // ==============================
     // DirectX12オブジェクト
@@ -187,65 +104,4 @@ private:
     Microsoft::WRL::ComPtr<ID3D12CommandQueue> commandQueue_;
     Microsoft::WRL::ComPtr<ID3D12CommandAllocator> commandAllocator_;
     Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> commandList_;
-
-    // ==============================
-    // SwapChain
-    // ==============================
-
-    // スワップチェーン
-    Microsoft::WRL::ComPtr<IDXGISwapChain4> swapChain_;
-
-    // バックバッファ（ダブルバッファリング）
-    static constexpr UINT kBackBufferCount = 2;
-
-    Microsoft::WRL::ComPtr<ID3D12Resource>
-        swapChainResources_[kBackBufferCount];
-
-    // ==============================
-    // DescriptorHeap
-    // ==============================
-
-    // RTV用DescriptorHeap
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> rtvHeap_;
-
-    // DSV用DescriptorHeap
-    Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> dsvHeap_;
-
-    // ==============================
-    // DepthBuffer
-    // ==============================
-
-    Microsoft::WRL::ComPtr<ID3D12Resource> depthStencilResource_;
-
-    // ==============================
-    // DescriptorSize
-    // ==============================
-
-    UINT descriptorSizeRTV_ = 0;
-    UINT descriptorSizeDSV_ = 0;
-
-    // SwapChain生成
-    bool InitializeSwapChain(HWND hwnd, UINT width, UINT height);
-
-    // RTV生成
-    bool InitializeRTV();
-
-    // DSV・DepthBuffer生成
-    bool InitializeDSV(UINT width, UINT height);
-
-    // ==============================
-    // Fence・GPU同期
-    // ==============================
-
-    // GPUの処理完了を管理するFence
-    Microsoft::WRL::ComPtr<ID3D12Fence> fence_;
-
-    // GPUへ通知するFence値
-    uint64_t fenceValue_ = 0;
-
-    // GPU完了待機用イベント
-    HANDLE fenceEvent_ = nullptr;
-
-    // Fenceとイベントを生成
-    bool InitializeFence();
 };
