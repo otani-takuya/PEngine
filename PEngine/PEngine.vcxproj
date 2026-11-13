@@ -164,6 +164,7 @@ copy "$(windowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxil.dll" "$(TargetDir)dx
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Development|x64'">WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="Matrix.cpp" />
+    <ClCompile Include="ParticleEditor.cpp" />
     <ClCompile Include="ParticleManager.cpp" />
     <ClCompile Include="WinApp.cpp" />
   </ItemGroup>
@@ -223,6 +224,7 @@ copy "$(windowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxil.dll" "$(TargetDir)dx
     <ClInclude Include="Input.h" />
     <ClInclude Include="Matrix.h" />
     <ClInclude Include="ParticleData.h" />
+    <ClInclude Include="ParticleEditor.h" />
     <ClInclude Include="ParticleManager.h" />
     <ClInclude Include="WinApp.h" />
   </ItemGroup>

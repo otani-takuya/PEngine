@@ -31,6 +31,8 @@
 #include <numbers>
 
 #include "ParticleManager.h"
+#include "ParticleEditor.h"
+
 
 // DirectX12
 #include <d3d12.h>
@@ -3312,6 +3314,8 @@ int WINAPI WinMain(
 
 	ParticleManager particleManager;
 
+	ParticleEditor particleEditor;
+
 	ParticleManager::InitializeInfo particleInfo{};
 
 	particleInfo.device = device.Get();
@@ -3334,6 +3338,11 @@ int WINAPI WinMain(
 	// 初期化
 	bool particleInitialized =
 		particleManager.Initialize(particleInfo);
+
+
+	// ParticleEditorの初期化
+	particleEditor.Initialize(&particleManager);
+
 
 	assert(particleInitialized);
 
@@ -3500,23 +3509,6 @@ int WINAPI WinMain(
 	};
 
 
-
-	// ==========================================
-	// Particle配置設定
-	// ==========================================
-
-	// 各軸の配置数
-	int particleCountX = 10;
-	int particleCountY = 10;
-	int particleCountZ = 10;
-
-	// 配置間隔
-	float particleSpacing = 1.0f;
-
-	// 拡大率
-	float particleScale = 0.5f;
-
-
 	bool useModelTexture = false;
 
 	// ==============================
@@ -3543,7 +3535,6 @@ int WINAPI WinMain(
 	bool isDrawMultiMaterial = false;
 	bool isDrawSuzanne = false;
 	bool isDrawFence = true;
-	bool isDrawParticle = true;
 
 	// ==========================================
 	// Billboard設定
@@ -3558,35 +3549,6 @@ int WINAPI WinMain(
 	// ==========================================
 	FrameRateController frameRateController;
 	const float deltaTime = frameRateController.GetFixedDeltaTime();
-
-	// ==========================================
-	// Particle生成用ImGui変数
-	// ==========================================
-
-	// 1回の生成数
-	int emitCount = 20;
-
-	// 生成位置
-	float emitPosition[3] = {
-		0.0f, 2.0f, 0.0f
-	};
-
-	// 速度の最小値
-	float emitVelocityMin[3] = {
-		-3.0f, 2.0f, -3.0f
-	};
-
-	// 速度の最大値
-	float emitVelocityMax[3] = {
-		3.0f, 5.0f, 3.0f
-	};
-
-	// 重力
-	float emitGravity = -9.8f;
-
-	// 寿命
-	float emitLifeTimeMin = 0.5f;
-	float emitLifeTimeMax = 2.0f;
 
 	//音声読み込み
 	SoundData soundData1 = SoundLoadWave("resources/Alarm01.wav");
@@ -3701,6 +3663,13 @@ int WINAPI WinMain(
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
+
+		// ========================================
+		// Particle Editor
+		// ========================================
+		particleEditor.Draw();
+
+
 		ImGui::Begin("Material");
 
 		// ==============================
@@ -3717,254 +3686,6 @@ int WINAPI WinMain(
 		ImGui::Checkbox("Draw Sphere", &isDrawSphere);
 		ImGui::Checkbox("Draw Sprite", &isDrawSprite);
 		ImGui::Checkbox("Draw Fence", &isDrawFence);
-
-
-
-#ifdef USE_IMGUI
-
-		if (ImGui::CollapsingHeader(
-			"Particle Settings",
-			ImGuiTreeNodeFlags_DefaultOpen
-		)) {
-
-			ImGui::Checkbox(
-				"Draw Particle",
-				&isDrawParticle
-			);
-
-			ImGui::SeparatorText("Grid Count");
-
-			ImGui::SliderInt(
-				"Count X",
-				&particleCountX,
-				1,
-				10
-			);
-
-			ImGui::SliderInt(
-				"Count Y",
-				&particleCountY,
-				1,
-				10
-			);
-
-			ImGui::SliderInt(
-				"Count Z",
-				&particleCountZ,
-				1,
-				10
-			);
-
-			ImGui::SeparatorText("Transform");
-
-			ImGui::DragFloat(
-				"Spacing",
-				&particleSpacing,
-				0.01f,
-				0.1f,
-				5.0f
-			);
-
-			ImGui::DragFloat(
-				"Scale",
-				&particleScale,
-				0.01f,
-				0.01f,
-				3.0f
-			);
-
-			ImGui::SeparatorText("Instance Info");
-
-			ImGui::Text(
-				"Instance Count : %u",
-				particleManager.GetInstanceCount()
-			);
-
-			ImGui::Text(
-				"Max Instance : %u",
-				particleManager.GetMaxInstanceCount()
-			);
-
-
-
-			// ==========================================
-			// Billboard設定
-			// ==========================================
-
-			ImGui::SeparatorText("Billboard");
-
-			// Billboardの種類を選択
-			const char* billboardItems[] = {
-				"None",
-				"Spherical",
-				"Cylindrical"
-			};
-
-			ImGui::Combo(
-				"Billboard Type",
-				&billboardType,
-				billboardItems,
-				IM_ARRAYSIZE(billboardItems)
-			);
-
-
-		}
-
-		ImGui::SeparatorText("Particle Life");
-
-		// 現在生存しているParticle数
-		ImGui::Text(
-			"Alive Particles : %u",
-			particleManager.GetParticleCount()
-		);
-
-		// GPUへ送っているインスタンス数
-		ImGui::Text(
-			"Draw Instances : %u",
-			particleManager.GetInstanceCount()
-		);
-
-
-		// ==========================================
-		// Particle Emitter設定
-		// ==========================================
-		ImGui::SeparatorText("Particle Emitter");
-
-		// 生成数
-		ImGui::SliderInt(
-			"Emit Count",
-			&emitCount,
-			1,
-			100
-		);
-
-		// 生成位置
-		ImGui::DragFloat3(
-			"Emit Position",
-			emitPosition,
-			0.1f
-		);
-
-		// ==========================================
-		// 初速度
-		// ==========================================
-		ImGui::SeparatorText("Velocity");
-
-		ImGui::DragFloat3(
-			"Velocity Min",
-			emitVelocityMin,
-			0.1f
-		);
-
-		ImGui::DragFloat3(
-			"Velocity Max",
-			emitVelocityMax,
-			0.1f
-		);
-
-		// ==========================================
-		// 重力
-		// ==========================================
-		ImGui::SeparatorText("Acceleration");
-
-		ImGui::DragFloat(
-			"Gravity",
-			&emitGravity,
-			0.1f,
-			-30.0f,
-			30.0f
-		);
-
-		// ==========================================
-		// 寿命
-		// ==========================================
-		ImGui::SeparatorText("Life Time");
-
-		ImGui::DragFloat(
-			"Life Time Min",
-			&emitLifeTimeMin,
-			0.1f,
-			0.01f,
-			10.0f
-		);
-
-		ImGui::DragFloat(
-			"Life Time Max",
-			&emitLifeTimeMax,
-			0.1f,
-			0.01f,
-			10.0f
-		);
-
-		// ==========================================
-		// Particle生成設定を反映
-		// ==========================================
-		ParticleManager::EmitSettings settings{};
-
-		settings.velocityMin = {
-			emitVelocityMin[0],
-			emitVelocityMin[1],
-			emitVelocityMin[2]
-		};
-
-		settings.velocityMax = {
-			emitVelocityMax[0],
-			emitVelocityMax[1],
-			emitVelocityMax[2]
-		};
-
-		settings.gravity = emitGravity;
-
-		settings.lifeTimeMin = emitLifeTimeMin;
-		settings.lifeTimeMax = emitLifeTimeMax;
-
-		particleManager.SetEmitSettings(settings);
-
-		// ==========================================
-		// 生成・削除ボタン
-		// ==========================================
-		if (ImGui::Button("Emit Particles")) {
-
-			// Emitterモードへ切り替え
-			particleManager.SetParticleMode(
-				ParticleManager::ParticleMode::kEmitter
-			);
-
-			// Particleを生成
-			particleManager.Emit(
-				{
-					emitPosition[0],
-					emitPosition[1],
-					emitPosition[2]
-				},
-				static_cast<uint32_t>(emitCount)
-			);
-		}
-
-		ImGui::SameLine();
-
-		if (ImGui::Button("Clear Particles")) {
-			particleManager.ClearParticles();
-		}
-
-		// ==========================================
-		// Particle数の表示
-		// ==========================================
-		ImGui::SeparatorText("Particle Info");
-
-		ImGui::Text(
-			"Alive Particles : %u",
-			particleManager.GetParticleCount()
-		);
-
-		ImGui::Text(
-			"Max Particles : %u",
-			particleManager.GetMaxInstanceCount()
-		);
-
-
-#endif
-
 
 		// ==============================
 		// MultiMesh操作
@@ -4798,49 +4519,6 @@ int WINAPI WinMain(
 			);
 
 
-
-		// ==========================================
-		// ImGuiの設定をParticleManagerへ反映
-		// ==========================================
-
-		particleManager.SetGridSettings(
-			static_cast<uint32_t>(particleCountX),
-			static_cast<uint32_t>(particleCountY),
-			static_cast<uint32_t>(particleCountZ),
-			particleSpacing,
-			particleScale
-		);
-
-
-
-
-		// ==========================================
-		// Billboard設定をParticleManagerへ反映
-		// ==========================================
-
-		switch (billboardType) {
-
-		case 1:
-			particleManager.SetBillboardType(
-				ParticleManager::BillboardType::kSpherical
-			);
-			break;
-
-		case 2:
-			particleManager.SetBillboardType(
-				ParticleManager::BillboardType::kCylindrical
-			);
-			break;
-
-		case 0:
-		default:
-			particleManager.SetBillboardType(
-				ParticleManager::BillboardType::kNone
-			);
-			break;
-		}
-
-
 		// ==========================================
 		// Particle更新
 		// ==========================================
@@ -5406,9 +5084,6 @@ int WINAPI WinMain(
 		// ==========================================
 		// ParticleManagerによる描画
 		// ==========================================
-
-		// 描画ON/OFFを設定
-		particleManager.SetVisible(isDrawParticle);
 
 		// Particle描画
 		particleManager.Draw(
