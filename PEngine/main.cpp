@@ -1846,6 +1846,13 @@ int WINAPI WinMain(
 
 
 	// ==============================
+	// 破壊対象の岩モデルを読み込む
+	// resources/block.obj を配置すること
+	// ==============================
+	ModelData modelDataBlock = LoadObjectFile("resources", "block.obj");
+	assert(!modelDataBlock.vertices.empty());
+
+	// ==============================
 	// Stanford Bunny読み込み
 	// ==============================
 	ModelData modelDataBunny =
@@ -1930,6 +1937,10 @@ int WINAPI WinMain(
 			sizeof(VertexData) * modelDataTeapot.vertices.size()
 		);
 
+	// 岩モデル専用頂点リソース
+	auto vertexResourceBlock = CreateBufferResource(
+		device.Get(), sizeof(VertexData) * modelDataBlock.vertices.size());
+
 	// ==============================
 	// Stanford Bunny用頂点リソース
 	// ==============================
@@ -1993,6 +2004,9 @@ int WINAPI WinMain(
 			sizeof(TransformationMatrix)
 		);
 
+
+	// 岩モデル専用WVPリソース
+	auto wvpResourceBlock = CreateBufferResource(device.Get(), sizeof(TransformationMatrix));
 
 	// ==============================
 	// Stanford Bunny用WVP Resource
@@ -2270,6 +2284,7 @@ int WINAPI WinMain(
 	Material* materialData = nullptr;
 	TransformationMatrix* wvpDataPlane = nullptr;
 	TransformationMatrix* wvpDataSphere = nullptr;
+	TransformationMatrix* wvpDataBlock = nullptr;
 	TransformationMatrix* wvpDataTeapot = nullptr;
 
 	materialResource->Map(0, nullptr, reinterpret_cast<void**>(&materialData));
@@ -2326,6 +2341,12 @@ int WINAPI WinMain(
 	vertexBufferViewTeapot.SizeInBytes =
 		static_cast<UINT>(sizeof(VertexData) * modelDataTeapot.vertices.size());
 	vertexBufferViewTeapot.StrideInBytes = sizeof(VertexData);
+
+	// 岩モデル専用頂点バッファビュー
+	D3D12_VERTEX_BUFFER_VIEW vertexBufferViewBlock{};
+	vertexBufferViewBlock.BufferLocation = vertexResourceBlock->GetGPUVirtualAddress();
+	vertexBufferViewBlock.SizeInBytes = static_cast<UINT>(sizeof(VertexData) * modelDataBlock.vertices.size());
+	vertexBufferViewBlock.StrideInBytes = sizeof(VertexData);
 
 	//indexBufferViewの作成
 	D3D12_INDEX_BUFFER_VIEW indexBufferViewSprite{};
@@ -2421,6 +2442,12 @@ int WINAPI WinMain(
 		sizeof(VertexData) * modelDataTeapot.vertices.size()
 	);
 
+	// 岩モデルの頂点データをGPUリソースへコピー
+	VertexData* vertexDataBlock = nullptr;
+	vertexResourceBlock->Map(0, nullptr, reinterpret_cast<void**>(&vertexDataBlock));
+	std::memcpy(vertexDataBlock, modelDataBlock.vertices.data(),
+		sizeof(VertexData) * modelDataBlock.vertices.size());
+
 	// ==============================
 	// Stanford Bunny頂点データ
 	// ==============================
@@ -2497,6 +2524,11 @@ int WINAPI WinMain(
 		nullptr,
 		reinterpret_cast<void**>(&wvpDataTeapot)
 	);
+
+	// 岩モデルの行列データをマッピング
+	wvpResourceBlock->Map(0, nullptr, reinterpret_cast<void**>(&wvpDataBlock));
+	wvpDataBlock->World = Matrix::MakeIdentity4x4();
+	wvpDataBlock->WVP = Matrix::MakeIdentity4x4();
 
 	wvpResourceBunny->Map(
 		0,
@@ -3032,6 +3064,54 @@ int WINAPI WinMain(
 			commandList
 		);
 
+	// ========================================
+	// 破壊可能な岩モデル専用テクスチャ
+	// block.mtl の map_Kd から block.png を取得
+	// ========================================
+	assert(!modelDataBlock.material.textureFilePath.empty());
+	DirectX::ScratchImage mipImagesBlock =
+		LoadTexture(modelDataBlock.material.textureFilePath);
+	const DirectX::TexMetadata& metadataBlock =
+		mipImagesBlock.GetMetadata();
+	Microsoft::WRL::ComPtr<ID3D12Resource> textureResourceBlock =
+		CreateTextureResource(device.Get(), metadataBlock);
+	Microsoft::WRL::ComPtr<ID3D12Resource> intermediateResourceBlock =
+		UploadTextureData(textureResourceBlock.Get(), mipImagesBlock,
+			device.Get(), commandList);
+
+	// ========================================
+	// 岩破壊Particle用テクスチャ
+	// ========================================
+
+	// 自作PNGを読み込む
+	DirectX::ScratchImage mipImagesRock =
+		LoadTexture(
+			"resources/Textures/Particles/RockBreak/rock_fragment_01.png"
+		);
+
+	// テクスチャ情報を取得
+	const DirectX::TexMetadata& metadataRock =
+		mipImagesRock.GetMetadata();
+
+	// GPUテクスチャリソースを生成
+	Microsoft::WRL::ComPtr<ID3D12Resource> textureResourceRock =
+		CreateTextureResource(
+			device.Get(),
+			metadataRock
+		);
+
+	// GPUへの転送命令を登録
+	// 転送完了までリソースを保持する
+	Microsoft::WRL::ComPtr<ID3D12Resource> intermediateResourceRock =
+		UploadTextureData(
+			textureResourceRock.Get(),
+			mipImagesRock,
+			device.Get(),
+			commandList
+		);
+
+
+
 	// 全テクスチャの転送命令を積んだ後にClose
 	hr = commandList->Close();
 	assert(SUCCEEDED(hr));
@@ -3308,6 +3388,70 @@ int WINAPI WinMain(
 		textureSrvHandleCPUFence
 	);
 
+	// ========================================
+	// 破壊可能な岩モデル用SRV（番号9）
+	// 番号7はParticleインスタンシング、8は破片用
+	// ========================================
+	constexpr uint32_t kBlockTextureSrvIndex = 9;
+	D3D12_CPU_DESCRIPTOR_HANDLE textureSrvHandleCPUBlock =
+		GetCPUDescriptorHandle(srvDescriptorheap, descriptorSizeSRV,
+			kBlockTextureSrvIndex);
+	D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPUBlock =
+		GetGPUDescriptorHandle(srvDescriptorheap, descriptorSizeSRV,
+			kBlockTextureSrvIndex);
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDescBlock{};
+	srvDescBlock.Format = metadataBlock.format;
+	srvDescBlock.Shader4ComponentMapping =
+		D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDescBlock.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDescBlock.Texture2D.MipLevels =
+		static_cast<UINT>(metadataBlock.mipLevels);
+	device->CreateShaderResourceView(textureResourceBlock.Get(),
+		&srvDescBlock, textureSrvHandleCPUBlock);
+
+	// ========================================
+	// 岩破壊Particle用SRV
+	// ========================================
+
+	// SRV番号8を使用する
+	constexpr uint32_t kRockTextureSrvIndex = 8;
+
+	// CPU側DescriptorHandle
+	D3D12_CPU_DESCRIPTOR_HANDLE textureSrvHandleCPURock =
+		GetCPUDescriptorHandle(
+			srvDescriptorheap,
+			descriptorSizeSRV,
+			kRockTextureSrvIndex
+		);
+
+	// GPU側DescriptorHandle
+	D3D12_GPU_DESCRIPTOR_HANDLE textureSrvHandleGPURock =
+		GetGPUDescriptorHandle(
+			srvDescriptorheap,
+			descriptorSizeSRV,
+			kRockTextureSrvIndex
+		);
+
+	// SRVの設定
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDescRock{};
+
+	srvDescRock.Format = metadataRock.format;
+	srvDescRock.Shader4ComponentMapping =
+		D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+
+	srvDescRock.ViewDimension =
+		D3D12_SRV_DIMENSION_TEXTURE2D;
+
+	srvDescRock.Texture2D.MipLevels =
+		static_cast<UINT>(metadataRock.mipLevels);
+
+	// SRV生成
+	device->CreateShaderResourceView(
+		textureResourceRock.Get(),
+		&srvDescRock,
+		textureSrvHandleCPURock
+	);
+
 	// ==========================================
 	// ParticleManager初期化
 	// ==========================================
@@ -3360,11 +3504,7 @@ int WINAPI WinMain(
 		ParticleManager::BillboardType::kSpherical
 	);
 
-	// 原点付近から20個生成
-	particleManager.Emit(
-		{ 0.0f, 2.0f, 0.0f },
-		20
-	);
+	// ParticleはSPACEキーで破壊したときに生成する。
 
 
 
@@ -3442,6 +3582,15 @@ int WINAPI WinMain(
 		{0.0f, 0.0f, 0.0f}
 	};
 
+	// 破壊対象の岩：画面中央（ワールド原点）に配置
+	// block.obj の頂点座標は原点付近にある
+	Transform transformBlock{
+		{1.0f, 1.0f, 1.0f},
+		{0.0f, 0.0f, 0.0f},
+		{0.0f, 0.0f, 0.0f}
+	};
+	bool isBlockIntact = true;
+
 	// ==============================
 	// Stanford Bunny用Transform
 	// ==============================
@@ -3490,10 +3639,16 @@ int WINAPI WinMain(
 		{3.0f, 1.5f, -1.0f}
 	};
 
+
 	Transform cameraTransform{
+		// Scale
 		{1.0f, 1.0f, 1.0f},
-		{0.0f, 0.0f, 0.0f},
-		{0.0f, 0.0f, -10.0f}
+
+		// Rotate：X軸を45度下向きに回転
+		{0.785398f, 0.0f, 0.0f},
+
+		// Translate：岩の斜め上・手前に配置
+		{0.0f, 7.0f, -7.0f}
 	};
 
 	Transform transformSprite{
@@ -3526,15 +3681,15 @@ int WINAPI WinMain(
 	// ==============================
 	// 描画ON・OFF
 	// ==============================
-	bool isDrawPlane = true;
+	bool isDrawPlane = false;
 	bool isDrawSphere = false;
 	bool isDrawTeapot = false;
-	bool isDrawSprite = true;
+	bool isDrawSprite = false;
 	bool isDrawBunny = false;
 	bool isDrawMultiMesh = false;
 	bool isDrawMultiMaterial = false;
 	bool isDrawSuzanne = false;
-	bool isDrawFence = true;
+	bool isDrawFence = false;
 
 	// ==========================================
 	// Billboard設定
@@ -3607,6 +3762,16 @@ int WINAPI WinMain(
 			OutputDebugStringA("Hit 2\n");
 		}
 
+		// 岩の破壊と復元：押した瞬間だけ反応する
+		if (input->TriggerKey(DIK_SPACE) && isBlockIntact) {
+			isBlockIntact = false;
+			particleManager.Emit(transformBlock.translate, 24);
+		}
+		if (input->TriggerKey(DIK_R)) {
+			isBlockIntact = true;
+			particleManager.ClearParticles();
+		}
+
 		// ==============================
 		// マウスホイール入力
 		// ==============================
@@ -3668,6 +3833,39 @@ int WINAPI WinMain(
 		// Particle Editor
 		// ========================================
 		particleEditor.Draw();
+
+		// ========================================
+		// 操作説明ウィンドウ
+		// ========================================
+
+		// ウィンドウの表示位置（左下）
+		ImGui::SetNextWindowPos(
+			ImVec2(20.0f, static_cast<float>(kClientHeight) - 100.0f),
+			ImGuiCond_Always
+		);
+
+		// ウィンドウの背景を少し透明にする
+		ImGui::SetNextWindowBgAlpha(0.75f);
+
+		// ウィンドウの設定
+		ImGuiWindowFlags windowFlags =
+			ImGuiWindowFlags_NoTitleBar |
+			ImGuiWindowFlags_NoResize |
+			ImGuiWindowFlags_AlwaysAutoResize |
+			ImGuiWindowFlags_NoMove |
+			ImGuiWindowFlags_NoSavedSettings |
+			ImGuiWindowFlags_NoFocusOnAppearing;
+
+		// 操作説明の表示
+		ImGui::Begin("Control Guide", nullptr, windowFlags);
+
+		ImGui::TextUnformatted("CONTROLS");
+		ImGui::Separator();
+
+		ImGui::Text("SPACE : Play / Break");
+		ImGui::Text("R     : Reset");
+
+		ImGui::End();
 
 
 		ImGui::Begin("Material");
@@ -4429,6 +4627,10 @@ int WINAPI WinMain(
 				transformTeapot.translate
 			);
 
+		// 岩モデルのWorld行列
+		Matrix4x4 worldMatrixBlock = Matrix::MakeAffineMatrix(
+			transformBlock.scale, transformBlock.rotate, transformBlock.translate);
+
 		// ==============================
 		// Stanford Bunny World行列
 		// =============================
@@ -4564,6 +4766,10 @@ int WINAPI WinMain(
 				viewProjectionMatrix
 			);
 
+
+		// 岩モデルのWVP行列
+		wvpDataBlock->World = worldMatrixBlock;
+		wvpDataBlock->WVP = Matrix::Multiply(worldMatrixBlock, viewProjectionMatrix);
 
 		// ==============================
 		// Stanford Bunny WVP
@@ -4743,6 +4949,24 @@ int WINAPI WinMain(
 				0,
 				0
 			);
+		}
+
+		// ==========================================
+		// 破壊前の岩モデルを描画
+		// ==========================================
+		if (isBlockIntact) {
+			commandList->IASetVertexBuffers(0, 1, &vertexBufferViewBlock);
+			commandList->IASetIndexBuffer(nullptr);
+			commandList->SetGraphicsRootConstantBufferView(
+				0, materialResource->GetGPUVirtualAddress());
+			commandList->SetGraphicsRootConstantBufferView(
+				1, wvpResourceBlock->GetGPUVirtualAddress());
+			// block.mtl が指定する block.png を使用
+			commandList->SetGraphicsRootDescriptorTable(2, textureSrvHandleGPUBlock);
+			commandList->SetGraphicsRootConstantBufferView(
+				3, directionalLightResource->GetGPUVirtualAddress());
+			commandList->DrawInstanced(
+				static_cast<UINT>(modelDataBlock.vertices.size()), 1, 0, 0);
 		}
 
 		// ==========================================
@@ -5085,14 +5309,16 @@ int WINAPI WinMain(
 		// ParticleManagerによる描画
 		// ==========================================
 
-		// Particle描画
+		// ========================================
+		// 岩破壊Particle描画
+		// ========================================
 		particleManager.Draw(
 			commandList,
 			vertexBufferViewPlane,
 			static_cast<UINT>(
 				modelDataPlane.vertices.size()
 				),
-			textureSrvHandleGPU
+			textureSrvHandleGPURock
 		);
 
 

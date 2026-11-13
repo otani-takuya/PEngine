@@ -37,9 +37,53 @@ public:
         Vector3 velocity = { 0.0f, 0.0f, 0.0f };
         Vector3 acceleration = { 0.0f, 0.0f, 0.0f };
         Vector4 color = { 1.0f, 1.0f, 1.0f, 1.0f };
+        // ========================================
+        // Particle個別の色設定
+        // ========================================
+
+        // 生成時に設定された開始色
+        Vector4 startColor = {
+            1.0f, 1.0f, 1.0f, 1.0f
+        };
+
+        // 生成時に設定された終了色
+        Vector4 endColor = {
+            1.0f, 1.0f, 1.0f, 1.0f
+        };
+
+
+        // ========================================
+        // Particle個別のサイズ設定
+        // ========================================
+
+        // 生成時に設定された開始サイズ倍率
+        float startSize = 1.0f;
+
+        // 生成時に設定された終了サイズ倍率
+        float endSize = 0.0f;
+
+        // ========================================
+        // Particle個別のランダムサイズ倍率
+        // ========================================
+
+        // 生成時に決定するサイズ倍率
+        float randomSizeScale = 1.0f;
+
+
         float currentTime = 0.0f;
         float lifeTime = 1.0f;
+
+        // ========================================
+        // Rotation Over Lifetime
+        // ========================================
+
+        // 生成時の回転角度（ラジアン）
+        float rotation = 0.0f;
+
+        // 回転速度（ラジアン/秒）
+        float rotationSpeed = 0.0f;
     };
+
 
     // Particleの生成パラメータ（ImGuiに依存しない）
     struct EmitSettings {
@@ -48,6 +92,61 @@ public:
         float gravity = -9.8f;
         float lifeTimeMin = 0.5f;
         float lifeTimeMax = 2.0f;
+
+
+        // ========================================
+        // Particleの色設定
+        // ========================================
+
+        // 生成直後の色（RGBA）
+        Vector4 startColor = {
+            1.0f, 1.0f, 1.0f, 1.0f
+        };
+
+        // 寿命終了時の色（RGBA）
+        Vector4 endColor = {
+            1.0f, 1.0f, 1.0f, 1.0f
+        };
+
+
+        // ========================================
+        // Size Over Lifetime設定
+        // ========================================
+
+        // Particle生成時の開始サイズ倍率
+        float startSize = 1.0f;
+
+        // Particle寿命終了時のサイズ倍率
+        float endSize = 0.0f;
+
+        // ========================================
+        // Random Start Size設定
+        // ========================================
+
+        // サイズのランダム化を有効にする
+        bool randomSizeEnabled = true;
+
+        // ランダムサイズ倍率の最小値
+        float randomSizeMin = 0.5f;
+
+        // ランダムサイズ倍率の最大値
+        float randomSizeMax = 1.5f;
+
+        // ========================================
+        // Random Rotation設定
+        // ========================================
+
+        // 回転を有効にする
+        bool rotationEnabled = true;
+
+        // 生成時の回転角度の範囲（ラジアン）
+        float rotationMin = -3.14159265f;
+        float rotationMax = 3.14159265f;
+
+        // 回転速度の範囲（ラジアン/秒）
+        float rotationSpeedMin = -6.0f;
+        float rotationSpeedMax = 6.0f;
+
     };
 
     // エンジン側から渡す初期化情報（ポインタは借用）
@@ -107,6 +206,23 @@ public:
     ParticleMode GetParticleMode() const { return particleMode_; }
     void SetEmitSettings(const EmitSettings& settings);
     const EmitSettings& GetEmitSettings() const { return emitSettings_; }
+
+
+    // ========================================
+    // Fade Out設定
+    // ========================================
+
+    // フェードアウトの有効・無効を設定
+    void SetFadeOutEnabled(bool enabled) {
+        fadeOutEnabled_ = enabled;
+    }
+
+    // フェードアウトの設定状態を取得
+    bool IsFadeOutEnabled() const {
+        return fadeOutEnabled_;
+    }
+
+
     void Emit(const Vector3& position, uint32_t count);
     void ClearParticles();
     uint32_t GetParticleCount() const { return static_cast<uint32_t>(particles_.size()); }
@@ -188,4 +304,15 @@ private:
 
     // Billboardの状態
     BillboardType billboardType_ = BillboardType::kNone;
+
+
+    // ========================================
+    // Fade Out設定
+    // ========================================
+
+    // true  : 寿命に応じて透明になる
+    // false : 寿命終了まで不透明
+    bool fadeOutEnabled_ = true;
+
+
 };

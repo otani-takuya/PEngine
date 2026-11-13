@@ -69,29 +69,63 @@ private:
     // ========================================
 
     // 1回のParticle生成数
-    int emitCount_ = 20;
+    int emitCount_ = 24;
 
     // Particle生成位置
     float emitPosition_[3] = {
-        0.0f, 2.0f, 0.0f
+        0.0f, 0.0f, 0.0f
     };
 
     // 初速度の最小値
     float emitVelocityMin_[3] = {
-        -3.0f, 2.0f, -3.0f
+        -5.0f, 2.0f, -5.0f
     };
 
     // 初速度の最大値
     float emitVelocityMax_[3] = {
-        3.0f, 5.0f, 3.0f
+        5.0f, 7.0f, 5.0f
     };
 
     // 重力
     float emitGravity_ = -9.8f;
 
     // 寿命の最小値・最大値
-    float emitLifeTimeMin_ = 0.5f;
-    float emitLifeTimeMax_ = 2.0f;
+    float emitLifeTimeMin_ = 0.8f;
+    float emitLifeTimeMax_ = 1.3f;
+
+
+    // ========================================
+    // Fade Out設定
+    // ========================================
+
+    // Editor上で管理するFade Outの状態
+    bool fadeOutEnabled_ = true;
+
+
+    // ========================================
+    // Color Over Lifetime設定
+    // ========================================
+
+    // Particle生成時の開始色（RGB）
+    float startColor_[3] = {
+        0.64f, 0.55f, 0.44f
+    };
+
+    // Particle寿命終了時の色（RGB）
+    float endColor_[3] = {
+        0.33f, 0.29f, 0.26f
+    };
+
+
+    // ========================================
+    // Size Over Lifetime設定
+    // ========================================
+
+    // Particle生成時の開始サイズ倍率
+    float startSize_ = 1.0f;
+
+    // Particle寿命終了時のサイズ倍率
+    float endSize_ = 0.0f;
 
 
 };

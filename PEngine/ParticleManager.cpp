@@ -373,6 +373,29 @@ void ParticleManager::Update(
                 instancingData_[index].World = worldMatrix;
 
                 ++index;
+
+
+                // ==================================
+                // GPU用データに書き込む
+                // ==================================
+
+                // World View Projection行列
+                instancingData_[index].WVP = wvpMatrix;
+
+                // World行列
+                instancingData_[index].World = worldMatrix;
+
+                // Particleの色
+                // Gridモードは白色・不透明で表示
+                instancingData_[index].Color = {
+                    1.0f,
+                    1.0f,
+                    1.0f,
+                    1.0f
+                };
+
+                ++index;
+
             }
         }
     }
@@ -453,6 +476,39 @@ void ParticleManager::SetEmitSettings(const EmitSettings& settings) {
     emitSettings_.lifeTimeMin = (std::max)(emitSettings_.lifeTimeMin, 0.01f);
     emitSettings_.lifeTimeMax = (std::max)(emitSettings_.lifeTimeMax, 0.01f);
     fixRange(emitSettings_.lifeTimeMin, emitSettings_.lifeTimeMax);
+
+    // ========================================
+    // Random Start Sizeの範囲チェック
+    // ========================================
+
+    // 最小値と最大値が逆なら入れ替える
+    fixRange(
+        emitSettings_.randomSizeMin,
+        emitSettings_.randomSizeMax
+    );
+
+    // サイズ倍率が負にならないようにする
+    emitSettings_.randomSizeMin =
+        (std::max)(emitSettings_.randomSizeMin, 0.0f);
+
+    emitSettings_.randomSizeMax =
+        (std::max)(emitSettings_.randomSizeMax, 0.0f);
+
+    // ========================================
+    // Rotation設定の範囲チェック
+    // ========================================
+
+    // 回転角度の最小・最大を補正
+    fixRange(
+        emitSettings_.rotationMin,
+        emitSettings_.rotationMax
+    );
+
+    // 回転速度の最小・最大を補正
+    fixRange(
+        emitSettings_.rotationSpeedMin,
+        emitSettings_.rotationSpeedMax
+    );
 }
 
 // ==========================================
@@ -473,16 +529,154 @@ void ParticleManager::Emit(const Vector3& position, uint32_t count) {
     std::uniform_real_distribution<float> velocityZ(emitSettings_.velocityMin.z, emitSettings_.velocityMax.z);
     std::uniform_real_distribution<float> lifeTime(emitSettings_.lifeTimeMin, emitSettings_.lifeTimeMax);
 
+
+
     for (uint32_t i = 0; i < emitCount; ++i) {
+
+        // ========================================
+        // Particleの生成
+        // ========================================
         Particle particle{};
+
+        // ========================================
+        // Color Over Lifetime
+        // ========================================
+
+        // Emitterの開始色を保存
+        particle.startColor = emitSettings_.startColor;
+
+        // Emitterの終了色を保存
+        particle.endColor = emitSettings_.endColor;
+
+        // 現在の描画色を開始色で初期化
+        particle.color = particle.startColor;
+
+        // ========================================
+        // Size Over Lifetime
+        // ========================================
+
+        // Emitterの開始サイズを保存
+        particle.startSize = emitSettings_.startSize;
+
+        // Emitterの終了サイズを保存
+        particle.endSize = emitSettings_.endSize;
+
+        // ========================================
+        // Random Start Sizeの乱数分布
+        // ========================================
+    
+        std::uniform_real_distribution<float> randomSize(
+            emitSettings_.randomSizeMin,
+            emitSettings_.randomSizeMax
+        );
+
+        // ========================================
+        // Rotation用乱数分布
+        // ========================================
+
+        std::uniform_real_distribution<float> randomRotation(
+            emitSettings_.rotationMin,
+            emitSettings_.rotationMax
+        );
+
+        std::uniform_real_distribution<float> randomRotationSpeed(
+            emitSettings_.rotationSpeedMin,
+            emitSettings_.rotationSpeedMax
+        );
+
+        // ========================================
+        // Particle個別の回転設定
+        // ========================================
+
+        if (emitSettings_.rotationEnabled) {
+
+            // 生成時の回転角度
+            particle.rotation = randomRotation(randomEngine);
+
+            // 回転速度
+            particle.rotationSpeed = randomRotationSpeed(randomEngine);
+
+        }
+        else {
+
+            particle.rotation = 0.0f;
+            particle.rotationSpeed = 0.0f;
+        }
+
+        // ========================================
+        // Particle個別のサイズ倍率を決定
+        // ========================================
+
+        if (emitSettings_.randomSizeEnabled) {
+
+            // 指定範囲からランダムな倍率を取得
+            particle.randomSizeScale = randomSize(randomEngine);
+
+        }
+        else {
+
+            // ランダム化が無効なら等倍
+            particle.randomSizeScale = 1.0f;
+        }
+
+
+        // ========================================
+        // Transformの初期化
+        // ========================================
+
+        // 生成位置
         particle.transform.translate = position;
-        particle.transform.scale = { particleScale_, particleScale_, particleScale_ };
-        particle.velocity = { velocityX(randomEngine), velocityY(randomEngine), velocityZ(randomEngine) };
-        particle.acceleration = { 0.0f, emitSettings_.gravity, 0.0f };
+
+        // ========================================
+        // 生成時のサイズを設定
+        // ========================================
+
+        const float initialScale =
+            particle.startSize *
+            particleScale_ *
+            particle.randomSizeScale;
+
+        particle.transform.scale = {
+            initialScale,
+            initialScale,
+            initialScale
+        };
+
+        // ========================================
+        // 速度・加速度の初期化
+        // ========================================
+
+        // 初速度
+        particle.velocity = {
+            velocityX(randomEngine),
+            velocityY(randomEngine),
+            velocityZ(randomEngine)
+        };
+
+        // 重力
+        particle.acceleration = {
+            0.0f,
+            emitSettings_.gravity,
+            0.0f
+        };
+
+        // ========================================
+        // 寿命の初期化
+        // ========================================
+
+        // 経過時間
         particle.currentTime = 0.0f;
+
+        // Particleの寿命
         particle.lifeTime = lifeTime(randomEngine);
+
+        // ========================================
+        // Particleをコンテナへ追加
+        // ========================================
         particles_.push_back(particle);
     }
+
+
 }
 
 // ==========================================
@@ -547,28 +741,174 @@ void ParticleManager::UpdateEmitter(
         particle.transform.translate.y += particle.velocity.y * deltaTime;
         particle.transform.translate.z += particle.velocity.z * deltaTime;
 
-        // 寿命の残りに応じて表示スケールだけを小さくする
-        const float lifeRatio = (std::clamp)(particle.currentTime / particle.lifeTime, 0.0f, 1.0f);
-        const float remainingScale = 1.0f - lifeRatio;
-        const Vector3 drawScale = {
-            particle.transform.scale.x * remainingScale,
-            particle.transform.scale.y * remainingScale,
-            particle.transform.scale.z * remainingScale
-        };
+        // ========================================
+        // Rotation Over Lifetime
+        // ========================================
 
-        Matrix4x4 world{};
-        if (billboardType_ == BillboardType::kNone) {
-            world = Matrix::MakeAffineMatrix(drawScale, particle.transform.rotate, particle.transform.translate);
+        // 経過時間に応じて回転角度を更新
+        particle.rotation +=
+            particle.rotationSpeed * deltaTime;
+
+
+        // ========================================
+        // Particleの寿命による変化
+        // ========================================
+
+        // 寿命の経過率を計算
+        // 0.0f：生成直後
+        // 1.0f：寿命終了
+        const float lifeRatio = (std::clamp)(
+            particle.currentTime / particle.lifeTime,
+            0.0f,
+            1.0f
+            );
+
+
+        // ========================================
+        // Color Over Lifetime
+        // 寿命に応じたRGBの補間
+        // ========================================
+
+        // Red（赤）の補間
+        particle.color.x =
+            particle.startColor.x +
+            (particle.endColor.x - particle.startColor.x)
+            * lifeRatio;
+
+        // Green（緑）の補間
+        particle.color.y =
+            particle.startColor.y +
+            (particle.endColor.y - particle.startColor.y)
+            * lifeRatio;
+
+        // Blue（青）の補間
+        particle.color.z =
+            particle.startColor.z +
+            (particle.endColor.z - particle.startColor.z)
+            * lifeRatio;
+
+
+        // ========================================
+        // Fade Out設定による透明度の更新
+        // ========================================
+
+        if (fadeOutEnabled_) {
+
+            // Fade Outが有効な場合
+            // 寿命に応じて透明度を下げる
+            particle.color.w = 1.0f - lifeRatio;
+
         }
         else {
-            const Matrix4x4 scale = Matrix::MakeScaleMatrix(drawScale);
-            const Matrix4x4 translate = Matrix::MakeTranslateMatrix(particle.transform.translate);
-            world = Matrix::Multiply(Matrix::Multiply(scale, billboard), translate);
+
+            // Fade Outが無効な場合
+            // 寿命が尽きるまで不透明にする
+            particle.color.w = 1.0f;
         }
 
+
+
+        // ========================================
+        // Size Over Lifetime
+        // 寿命に応じたサイズの補間
+        // ========================================
+
+        // 開始サイズから終了サイズへ線形補間
+        const float sizeRate =
+            particle.startSize +
+            (particle.endSize - particle.startSize)
+            * lifeRatio;
+
+        // ========================================
+        // Size Over Lifetime × Random Start Size
+        // ========================================
+
+        // 寿命によるサイズ変化に個別のランダム倍率を適用
+        const float currentScale =
+            particleScale_ *
+            sizeRate *
+            particle.randomSizeScale;
+
+        // 描画用スケールを設定
+        const Vector3 drawScale = {
+            currentScale,
+            currentScale,
+            currentScale
+        };
+
+
+        // ========================================
+        // ParticleのWorld行列
+        // ========================================
+
+        Matrix4x4 world{};
+
+        // Z軸回転
+        // Billboard使用時はカメラ正面の面内で回転する
+        const Vector3 rotation = {
+            0.0f,
+            0.0f,
+            particle.rotation
+        };
+
+        if (billboardType_ == BillboardType::kNone) {
+
+            // Billboardなし
+            world = Matrix::MakeAffineMatrix(
+                drawScale,
+                rotation,
+                particle.transform.translate
+            );
+
+        }
+        else {
+
+            // Scale
+            const Matrix4x4 scale =
+                Matrix::MakeScaleMatrix(drawScale);
+
+            // Z軸回転
+            const Matrix4x4 rotate =
+                Matrix::MakeRotateZMatrix(particle.rotation);
+
+            // Billboard
+            const Matrix4x4 translate =
+                Matrix::MakeTranslateMatrix(
+                    particle.transform.translate
+                );
+
+            // S × R × Billboard × T
+            world = Matrix::Multiply(
+                Matrix::Multiply(
+                    Matrix::Multiply(scale, rotate),
+                    billboard
+                ),
+                translate
+            );
+        }
+
+
+        // ========================================
+        // GPU用データに書き込む
+        // ========================================
+
+        // World行列
         instancingData_[index].World = world;
-        instancingData_[index].WVP = Matrix::Multiply(world, viewProjection);
+
+        // World View Projection行列
+        instancingData_[index].WVP =
+            Matrix::Multiply(
+                world,
+                viewProjection
+            );
+
+        // Particleごとの色情報
+        instancingData_[index].Color =
+            particle.color;
+
+        // 次のインスタンスへ
         ++index;
+
     }
     instanceCount_ = index;
 }

@@ -19,6 +19,13 @@ void ParticleEditor::Initialize(
         return;
     }
 
+    // ========================================
+    // Fade Out設定を同期
+    // ========================================
+
+    // ParticleManagerが保持している設定を取得
+    fadeOutEnabled_ =
+        particleManager_->IsFadeOutEnabled();
 
     // ========================================
     // Grid初期設定
@@ -36,8 +43,24 @@ void ParticleEditor::Initialize(
     // Emitter設定を取得
     // ========================================
 
-    const ParticleManager::EmitSettings& settings =
+    const ParticleManager::EmitSettings settings =
         particleManager_->GetEmitSettings();
+
+    // 開始色を取得
+    startColor_[0] = settings.startColor.x;
+    startColor_[1] = settings.startColor.y;
+    startColor_[2] = settings.startColor.z;
+
+    // 終了色を取得
+    endColor_[0] = settings.endColor.x;
+    endColor_[1] = settings.endColor.y;
+    endColor_[2] = settings.endColor.z;
+
+    // ========================================
+    // Size Over Lifetime
+    // ========================================
+    startSize_ = settings.startSize;
+    endSize_ = settings.endSize;
 
     // 初速度の最小値
     emitVelocityMin_[0] = settings.velocityMin.x;
@@ -66,7 +89,6 @@ void ParticleEditor::Initialize(
         );
 }
 
-
 // ========================================
 // Editorの描画
 // ========================================
@@ -74,27 +96,28 @@ void ParticleEditor::Draw() {
 
 #ifdef USE_IMGUI
 
-    // 非表示または未初期化なら終了
+    // ========================================
+    // 初期化・表示状態の確認
+    // ========================================
     if (!isVisible_ || particleManager_ == nullptr) {
         return;
     }
 
-    // Editorウィンドウ
+    // ImGui::End()はBegin()の戻り値に関係なく呼ぶ
+    const bool isWindowOpen =
+        ImGui::Begin("Particle Editor", &isVisible_);
 
-    if (ImGui::Begin("Particle Editor", &isVisible_)) {
+    if (isWindowOpen) {
 
-        ImGui::Text("PEngine Particle System");
+        ImGui::TextUnformatted("PEngine Particle System");
         ImGui::Separator();
 
         // ========================================
-        // Particleの表示設定
+        // Display Settings
         // ========================================
         ImGui::SeparatorText("Display Settings");
 
-        if (ImGui::Checkbox(
-            "Draw Particle",
-            &drawParticle_
-        )) {
+        if (ImGui::Checkbox("Draw Particle", &drawParticle_)) {
             particleManager_->SetVisible(drawParticle_);
         }
 
@@ -125,7 +148,6 @@ void ParticleEditor::Draw() {
             );
         }
 
-
         // ========================================
         // Grid Settings
         // ========================================
@@ -137,24 +159,23 @@ void ParticleEditor::Draw() {
                 ImGuiTreeNodeFlags_DefaultOpen
             )) {
 
-                // Gridの設定変更を検出
-                bool changed = false;
+                bool gridChanged = false;
 
                 ImGui::SeparatorText("Grid Count");
 
-                changed |= ImGui::SliderInt(
+                gridChanged |= ImGui::SliderInt(
                     "Count X",
                     &particleCountX_,
                     1, 10
                 );
 
-                changed |= ImGui::SliderInt(
+                gridChanged |= ImGui::SliderInt(
                     "Count Y",
                     &particleCountY_,
                     1, 10
                 );
 
-                changed |= ImGui::SliderInt(
+                gridChanged |= ImGui::SliderInt(
                     "Count Z",
                     &particleCountZ_,
                     1, 10
@@ -162,21 +183,20 @@ void ParticleEditor::Draw() {
 
                 ImGui::SeparatorText("Transform");
 
-                changed |= ImGui::DragFloat(
+                gridChanged |= ImGui::DragFloat(
                     "Spacing",
                     &particleSpacing_,
                     0.01f, 0.1f, 5.0f
                 );
 
-                changed |= ImGui::DragFloat(
+                gridChanged |= ImGui::DragFloat(
                     "Scale",
                     &particleScale_,
                     0.01f, 0.01f, 3.0f
                 );
 
-                // 変更があったときだけ反映
-                if (changed) {
-
+                // 変更時のみ設定を反映
+                if (gridChanged) {
                     particleManager_->SetGridSettings(
                         static_cast<uint32_t>(particleCountX_),
                         static_cast<uint32_t>(particleCountY_),
@@ -187,7 +207,6 @@ void ParticleEditor::Draw() {
                 }
             }
         }
-
 
         // ========================================
         // Emitter Settings
@@ -200,19 +219,23 @@ void ParticleEditor::Draw() {
                 ImGuiTreeNodeFlags_DefaultOpen
             )) {
 
-                // 設定が変更されたか
-                bool changed = false;
+                // 現在の設定を取得
+                // この変数は関数内で宣言する
+                ParticleManager::EmitSettings emitSettings =
+                    particleManager_->GetEmitSettings();
+
+                // Emitter設定の変更フラグ
+                bool emitterChanged = false;
 
                 // ========================================
-                // 生成設定
+                // Emission
                 // ========================================
                 ImGui::SeparatorText("Emission");
 
                 ImGui::SliderInt(
                     "Emit Count",
                     &emitCount_,
-                    1,
-                    100
+                    1, 100
                 );
 
                 ImGui::DragFloat3(
@@ -222,28 +245,36 @@ void ParticleEditor::Draw() {
                 );
 
                 // ========================================
-                // 初速度
+                // Velocity
                 // ========================================
                 ImGui::SeparatorText("Velocity");
 
-                changed |= ImGui::DragFloat3(
+                emitterChanged |= ImGui::DragFloat3(
                     "Velocity Min",
                     emitVelocityMin_,
                     0.1f
                 );
 
-                changed |= ImGui::DragFloat3(
+                emitterChanged |= ImGui::DragFloat3(
                     "Velocity Max",
                     emitVelocityMax_,
                     0.1f
                 );
 
+                // 最小値が最大値を超えないように補正
+                for (int i = 0; i < 3; ++i) {
+                    if (emitVelocityMin_[i] > emitVelocityMax_[i]) {
+                        emitVelocityMax_[i] = emitVelocityMin_[i];
+                        emitterChanged = true;
+                    }
+                }
+
                 // ========================================
-                // 重力
+                // Acceleration
                 // ========================================
                 ImGui::SeparatorText("Acceleration");
 
-                changed |= ImGui::DragFloat(
+                emitterChanged |= ImGui::DragFloat(
                     "Gravity",
                     &emitGravity_,
                     0.1f,
@@ -252,11 +283,11 @@ void ParticleEditor::Draw() {
                 );
 
                 // ========================================
-                // 寿命
+                // Life Time
                 // ========================================
                 ImGui::SeparatorText("Life Time");
 
-                changed |= ImGui::DragFloat(
+                emitterChanged |= ImGui::DragFloat(
                     "Life Time Min",
                     &emitLifeTimeMin_,
                     0.1f,
@@ -264,7 +295,7 @@ void ParticleEditor::Draw() {
                     10.0f
                 );
 
-                changed |= ImGui::DragFloat(
+                emitterChanged |= ImGui::DragFloat(
                     "Life Time Max",
                     &emitLifeTimeMax_,
                     0.1f,
@@ -272,77 +303,276 @@ void ParticleEditor::Draw() {
                     10.0f
                 );
 
-                // ========================================
-                // 入力値の補正
-                // ========================================
-
-                // 各軸で最小速度が最大速度を
-                // 超えないように補正
-                for (int i = 0; i < 3; ++i) {
-                    if (emitVelocityMin_[i] >
-                        emitVelocityMax_[i]) {
-
-                        emitVelocityMax_[i] =
-                            emitVelocityMin_[i];
-
-                        changed = true;
-                    }
-                }
-
-                // 寿命の下限を保証
+                // 寿命の範囲を補正
                 if (emitLifeTimeMin_ < 0.01f) {
                     emitLifeTimeMin_ = 0.01f;
-                    changed = true;
+                    emitterChanged = true;
                 }
 
                 if (emitLifeTimeMax_ < emitLifeTimeMin_) {
                     emitLifeTimeMax_ = emitLifeTimeMin_;
-                    changed = true;
+                    emitterChanged = true;
+                }
+
+                // ========================================
+                // Appearance
+                // ========================================
+                ImGui::SeparatorText("Appearance");
+
+                if (ImGui::Checkbox(
+                    "Enable Fade Out",
+                    &fadeOutEnabled_
+                )) {
+                    particleManager_->SetFadeOutEnabled(
+                        fadeOutEnabled_
+                    );
+                }
+
+                // ========================================
+                // Color Over Lifetime
+                // ========================================
+                ImGui::SeparatorText("Color Over Lifetime");
+
+                emitterChanged |= ImGui::ColorEdit3(
+                    "Start Color",
+                    startColor_
+                );
+
+                emitterChanged |= ImGui::ColorEdit3(
+                    "End Color",
+                    endColor_
+                );
+
+                // ========================================
+                // Size Over Lifetime
+                // ========================================
+                ImGui::SeparatorText("Size Over Lifetime");
+
+                emitterChanged |= ImGui::DragFloat(
+                    "Start Size",
+                    &startSize_,
+                    0.01f,
+                    0.0f,
+                    5.0f,
+                    "%.2f"
+                );
+
+                emitterChanged |= ImGui::DragFloat(
+                    "End Size",
+                    &endSize_,
+                    0.01f,
+                    0.0f,
+                    5.0f,
+                    "%.2f"
+                );
+
+                // ========================================
+                // Random Start Size
+                // ========================================
+                ImGui::SeparatorText("Random Start Size");
+
+                emitterChanged |= ImGui::Checkbox(
+                    "Enable Random Size",
+                    &emitSettings.randomSizeEnabled
+                );
+
+                if (emitSettings.randomSizeEnabled) {
+
+                    emitterChanged |= ImGui::DragFloat(
+                        "Random Size Min",
+                        &emitSettings.randomSizeMin,
+                        0.01f,
+                        0.0f,
+                        5.0f,
+                        "%.2f"
+                    );
+
+                    emitterChanged |= ImGui::DragFloat(
+                        "Random Size Max",
+                        &emitSettings.randomSizeMax,
+                        0.01f,
+                        0.0f,
+                        5.0f,
+                        "%.2f"
+                    );
+
+                    // 負のサイズ倍率を防止
+                    if (emitSettings.randomSizeMin < 0.0f) {
+                        emitSettings.randomSizeMin = 0.0f;
+                        emitterChanged = true;
+                    }
+
+                    // 最小値が最大値を超えた場合は補正
+                    if (emitSettings.randomSizeMax <
+                        emitSettings.randomSizeMin) {
+
+                        emitSettings.randomSizeMax =
+                            emitSettings.randomSizeMin;
+
+                        emitterChanged = true;
+                    }
+                }
+
+                // ========================================
+                // Rotation Over Lifetime
+                // ========================================
+                ImGui::SeparatorText("Rotation Over Lifetime");
+
+                // 回転の有効・無効
+                emitterChanged |= ImGui::Checkbox(
+                    "Enable Rotation",
+                    &emitSettings.rotationEnabled
+                );
+
+                // 回転が有効な場合のみ設定を表示
+                if (emitSettings.rotationEnabled) {
+
+                    // ========================================
+                    // Initial Rotation
+                    // ========================================
+                    ImGui::TextUnformatted("Initial Rotation");
+
+                    // 初期回転角度の最小値
+                    emitterChanged |= ImGui::SliderAngle(
+                        "Rotation Min",
+                        &emitSettings.rotationMin,
+                        -360.0f,
+                        360.0f
+                    );
+
+                    // 初期回転角度の最大値
+                    emitterChanged |= ImGui::SliderAngle(
+                        "Rotation Max",
+                        &emitSettings.rotationMax,
+                        -360.0f,
+                        360.0f
+                    );
+
+                    // ========================================
+                    // Rotation Speed
+                    // ========================================
+                    ImGui::TextUnformatted("Rotation Speed (rad/s)");
+
+                    // 回転速度の最小値
+                    emitterChanged |= ImGui::DragFloat(
+                        "Rotation Speed Min",
+                        &emitSettings.rotationSpeedMin,
+                        0.1f,
+                        -15.0f,
+                        15.0f,
+                        "%.2f"
+                    );
+
+                    // 回転速度の最大値
+                    emitterChanged |= ImGui::DragFloat(
+                        "Rotation Speed Max",
+                        &emitSettings.rotationSpeedMax,
+                        0.1f,
+                        -15.0f,
+                        15.0f,
+                        "%.2f"
+                    );
+
+                    // ========================================
+                    // 入力値の補正
+                    // ========================================
+
+                    // 初期角度の範囲を補正
+                    if (emitSettings.rotationMin >
+                        emitSettings.rotationMax) {
+
+                        emitSettings.rotationMax =
+                            emitSettings.rotationMin;
+
+                        emitterChanged = true;
+                    }
+
+                    // 回転速度の範囲を補正
+                    if (emitSettings.rotationSpeedMin >
+                        emitSettings.rotationSpeedMax) {
+
+                        emitSettings.rotationSpeedMax =
+                            emitSettings.rotationSpeedMin;
+
+                        emitterChanged = true;
+                    }
+
+                    // ========================================
+                    // 説明
+                    // ========================================
+                    ImGui::TextDisabled(
+                        "Each particle rotates at a random speed."
+                    );
                 }
 
 
                 // ========================================
                 // ParticleManagerへ設定を反映
                 // ========================================
-                if (changed) {
+                if (emitterChanged) {
 
-                    // 現在の設定をコピー
-                    ParticleManager::EmitSettings settings =
-                        particleManager_->GetEmitSettings();
-
-                    // 初速度
-                    settings.velocityMin = {
+                    // Velocity
+                    emitSettings.velocityMin = {
                         emitVelocityMin_[0],
                         emitVelocityMin_[1],
                         emitVelocityMin_[2]
                     };
 
-                    settings.velocityMax = {
+                    emitSettings.velocityMax = {
                         emitVelocityMax_[0],
                         emitVelocityMax_[1],
                         emitVelocityMax_[2]
                     };
 
-                    // 重力
-                    settings.gravity = emitGravity_;
+                    // Gravity
+                    emitSettings.gravity = emitGravity_;
 
-                    // 寿命
-                    settings.lifeTimeMin = emitLifeTimeMin_;
-                    settings.lifeTimeMax = emitLifeTimeMax_;
+                    // Life Time
+                    emitSettings.lifeTimeMin = emitLifeTimeMin_;
+                    emitSettings.lifeTimeMax = emitLifeTimeMax_;
 
-                    // 変更を反映
-                    particleManager_->SetEmitSettings(settings);
+                    // Color Over Lifetime
+                    emitSettings.startColor.x = startColor_[0];
+                    emitSettings.startColor.y = startColor_[1];
+                    emitSettings.startColor.z = startColor_[2];
+
+                    emitSettings.endColor.x = endColor_[0];
+                    emitSettings.endColor.y = endColor_[1];
+                    emitSettings.endColor.z = endColor_[2];
+
+                    // Size Over Lifetime
+                    emitSettings.startSize = startSize_;
+                    emitSettings.endSize = endSize_;
+
+                    // Random Start Sizeは
+                    // emitSettingsに直接変更済み
+
+                    particleManager_->SetEmitSettings(
+                        emitSettings
+                    );
                 }
 
+                // ========================================
+                // Fade Outの説明
+                // ========================================
+                if (fadeOutEnabled_) {
+                    ImGui::TextDisabled(
+                        "Particles fade out over their lifetime."
+                    );
+                }
+                else {
+                    ImGui::TextDisabled(
+                        "Particles remain opaque until they expire."
+                    );
+                }
 
                 // ========================================
-                // Particle生成・削除
+                // Controls
                 // ========================================
                 ImGui::SeparatorText("Controls");
 
                 if (ImGui::Button("Emit Particles")) {
 
-                    // 現在の設定でParticleを生成
                     particleManager_->Emit(
                         {
                             emitPosition_[0],
@@ -361,10 +591,8 @@ void ParticleEditor::Draw() {
             }
         }
 
-
-
         // ========================================
-        // Billboard設定
+        // Billboard
         // ========================================
         ImGui::SeparatorText("Billboard");
 
@@ -388,7 +616,7 @@ void ParticleEditor::Draw() {
         }
 
         // ========================================
-        // Particle情報
+        // Particle Info
         // ========================================
         ImGui::SeparatorText("Particle Info");
 
@@ -408,8 +636,8 @@ void ParticleEditor::Draw() {
         );
     }
 
+    // Begin()と必ず対になる
     ImGui::End();
-
 
 #endif
 }
