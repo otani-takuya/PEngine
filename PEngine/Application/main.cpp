@@ -1,78 +1,121 @@
 // ==============================
-// ライブラリ
+// 標準ライブラリ
 // ==============================
 
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+#include <string>
+#include <format>
+#include <cstdint>
+#include <sstream>
+#include <numbers>
+#include <vector>
+#include <cassert>
+
+// ==============================
+// Windows
+// ==============================
 
 #include <windows.h>
-#include <string>
-
-#pragma warning(push)
-#include <format>
-
-#pragma warning(disable:4023)
-#include <cstdint>
-
-#include <dxcapi.h>
-#pragma comment(lib, "dxcompiler.lib")
-
-#include "Matrix.h"
-
-#include<fstream>
-#include<sstream>
-
-#include <xaudio2.h>
-
-#pragma comment(lib,"xaudio2.lib")
-
-
-#include <numbers>
-
-#include "ParticleManager.h"
-#include "ParticleEditor.h"
-
-
-// DirectX12
-#include <d3d12.h>
-#include <dxgi1_6.h>
-#include <cassert>
-#include <dxgidebug.h>
-
-// ダンプ出力
 #include <dbghelp.h>
 #include <strsafe.h>
 
 #pragma comment(lib, "dbghelp.lib")
+
+// ==============================
+// DirectX12
+// ==============================
+
+#include <d3d12.h>
+#include <dxgi1_6.h>
+#include <dxgidebug.h>
+#include <wrl.h>
+
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dxguid.lib")
 
-#include "DebugCamera.h"
+// ==============================
+// DXC
+// ==============================
 
-#pragma warning(pop)
+#include <dxcapi.h>
 
+#pragma comment(lib, "dxcompiler.lib")
+
+// ==============================
+// XAudio2
+// ==============================
+
+#include <xaudio2.h>
+
+#pragma comment(lib, "xaudio2.lib")
+
+// ==============================
+// DirectXTex
+// ==============================
+
+#include "../externals/DirectXTex/DirectXTex.h"
+#include "../externals/DirectXTex/d3dx12.h"
+
+// ==============================
+// ImGui
+// ==============================
 
 #ifdef USE_IMGUI
-#include "externals/imgui/imgui.h"
-#include "externals/imgui/imgui_impl_dx12.h"
-#include "externals/imgui/imgui_impl_win32.h"
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+#include "../externals/imgui/imgui.h"
+#include "../externals/imgui/imgui_impl_dx12.h"
+#include "../externals/imgui/imgui_impl_win32.h"
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
+	HWND hwnd,
+	UINT msg,
+	WPARAM wParam,
+	LPARAM lParam
+);
+
 #endif
 
-#include "externals/DirectXTex/DirectXTex.h"
-#include "externals/DirectXTex/d3dx12.h"
+// ==============================
+// PEngine - Math
+// ==============================
 
-#include <vector>
+#include "Matrix.h"
 
-#include <wrl.h>
-//using Microsoft::WRL::ComPtr;
+// ==============================
+// PEngine - Platform
+// ==============================
 
-#include "Input.h"
 #include "WinApp.h"
+#include "Input.h"
+
+// ==============================
+// PEngine - Graphics
+// ==============================
+
 #include "DirectXCommon.h"
+#include "DebugCamera.h"
+
+// ==============================
+// PEngine - Renderer
+// ==============================
+
+#include "ParticleManager.h"
+
+// ==============================
+// PEngine - Editor
+// ==============================
+
+#include "ParticleEditor.h"
+
+// ==============================
+// PEngine - Core
+// ==============================
+
 #include "FrameRateController.h"
+
 
 DebugCamera* gDebugCamera = nullptr;
 
@@ -1712,12 +1755,12 @@ int WINAPI WinMain(
 
 
 	//ShaderをCompile
-	Microsoft::WRL::ComPtr<IDxcBlob> vertexShaderBlob = CompileShader(L"Object3d.VS.hlsl",
+	Microsoft::WRL::ComPtr<IDxcBlob> vertexShaderBlob = CompileShader(L"Shaders/Object3D/Object3d.VS.hlsl",
 		L"vs_6_0", dxcUtils, dxcCompiler, dxcIncludeHandler.Get());
 
 	assert(vertexShaderBlob != nullptr);
 
-	Microsoft::WRL::ComPtr<IDxcBlob> pixelShaderBlob = CompileShader(L"Object3d.PS.hlsl",
+	Microsoft::WRL::ComPtr<IDxcBlob> pixelShaderBlob = CompileShader(L"Shaders/Object3D/Object3d.PS.hlsl",
 		L"ps_6_0", dxcUtils, dxcCompiler, dxcIncludeHandler.Get());
 
 	assert(pixelShaderBlob != nullptr);
@@ -1728,7 +1771,7 @@ int WINAPI WinMain(
 	// ==========================================
 	Microsoft::WRL::ComPtr<IDxcBlob> vertexShaderBlobSuzanne =
 		CompileShader(
-			L"Suzanne.VS.hlsl",
+			L"Shaders/Samples/Suzanne.VS.hlsl",
 			L"vs_6_0",
 			dxcUtils,
 			dxcCompiler,
@@ -1738,7 +1781,7 @@ int WINAPI WinMain(
 
 	Microsoft::WRL::ComPtr<IDxcBlob> pixelShaderBlobSuzanne =
 		CompileShader(
-			L"Suzanne.PS.hlsl",
+			L"Shaders/Samples/Suzanne.PS.hlsl",
 			L"ps_6_0",
 			dxcUtils,
 			dxcCompiler,
@@ -1753,7 +1796,7 @@ int WINAPI WinMain(
 
 	Microsoft::WRL::ComPtr<IDxcBlob> vertexShaderBlobParticle =
 		CompileShader(
-			L"Particle.VS.hlsl",
+			L"Shaders/Particle/Particle.VS.hlsl",
 			L"vs_6_0",
 			dxcUtils,
 			dxcCompiler,
@@ -1764,7 +1807,7 @@ int WINAPI WinMain(
 
 	Microsoft::WRL::ComPtr<IDxcBlob> pixelShaderBlobParticle =
 		CompileShader(
-			L"Particle.PS.hlsl",
+			L"Shaders/Particle/Particle.PS.hlsl",
 			L"ps_6_0",
 			dxcUtils,
 			dxcCompiler,
@@ -3457,11 +3500,11 @@ int WINAPI WinMain(
 	// ==========================================
 
 	ParticleManager particleManager;
-
 	ParticleEditor particleEditor;
 
 	ParticleManager::InitializeInfo particleInfo{};
 
+	// DirectX12
 	particleInfo.device = device.Get();
 
 	particleInfo.srvHeap = srvDescriptorheap.Get();
@@ -3475,20 +3518,33 @@ int WINAPI WinMain(
 	particleInfo.dxcCompiler = dxcCompiler;
 	particleInfo.includeHandler = dxcIncludeHandler.Get();
 
-	// Shader
-	particleInfo.vertexShaderPath = L"Particle.VS.hlsl";
-	particleInfo.pixelShaderPath = L"Particle.PS.hlsl";
+	// ==========================================
+	// Shaderの読み込みパス
+	// ==========================================
 
-	// 初期化
+	particleInfo.vertexShaderPath =
+		L"Shaders/Particle/Particle.VS.hlsl";
+
+	particleInfo.pixelShaderPath =
+		L"Shaders/Particle/Particle.PS.hlsl";
+
+	// ==========================================
+	// ParticleManagerの初期化
+	// ==========================================
+
 	bool particleInitialized =
 		particleManager.Initialize(particleInfo);
 
-
-	// ParticleEditorの初期化
-	particleEditor.Initialize(&particleManager);
-
-
+	// 初期化結果を確認
 	assert(particleInitialized);
+
+	// ==========================================
+	// ParticleEditorの初期化
+	// ==========================================
+
+	if (particleInitialized) {
+		particleEditor.Initialize(&particleManager);
+	}
 
 	// ==========================================
 	// Particle生成テスト

@@ -1,5 +1,5 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<?xml version='1.0' encoding='utf-8'?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
   <ItemGroup>
     <Filter Include="ソース ファイル">
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
@@ -16,13 +16,70 @@
     <Filter Include="imgui">
       <UniqueIdentifier>{02421f03-7bd1-48d2-86df-a93eb1246958}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Application">
+      <UniqueIdentifier>{F7BDE14B-CCD6-5F1D-A10F-224A1D9B1760}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine">
+      <UniqueIdentifier>{33939412-4E40-5126-9230-CD630EEEF301}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Core">
+      <UniqueIdentifier>{D6BB06D3-8844-5D1B-9E06-79F6BAC00C5D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Core\Time">
+      <UniqueIdentifier>{AE8CD0AC-157A-5CB7-B5B0-FAEC7BC79D02}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Platform">
+      <UniqueIdentifier>{DCC56633-85E5-5860-9B22-895E2361B904}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Platform\Windows">
+      <UniqueIdentifier>{BE6397CE-370F-52C8-82EC-791DEFA6FF36}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Platform\Input">
+      <UniqueIdentifier>{0F316BB9-3BC1-56C4-867A-A7A9C37D45CD}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Graphics">
+      <UniqueIdentifier>{26D59536-B30F-5FF2-A995-2FD2A14CF488}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Graphics\DirectX">
+      <UniqueIdentifier>{8E95821D-8EC8-58D5-965F-E0FBDA262BBD}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Graphics\Camera">
+      <UniqueIdentifier>{2AC290E5-CBC0-5C98-94D8-5632C56B3050}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Renderer">
+      <UniqueIdentifier>{AF6CC1AC-0F94-5FDB-B858-A9A32B9D7977}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Renderer\Particle">
+      <UniqueIdentifier>{6EDDD29E-2E42-5161-960E-3F8216EED5CD}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Math">
+      <UniqueIdentifier>{40DF616E-32B4-5B07-B99F-69496CE97A90}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Editor">
+      <UniqueIdentifier>{841A9A20-B2CD-5342-859B-BB69FD3B874E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Editor\Particle">
+      <UniqueIdentifier>{9060F263-7C2F-585B-9ECB-F2D40A971D89}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders">
+      <UniqueIdentifier>{356FB6A7-6725-5172-A586-0559E471F473}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\Object3D">
+      <UniqueIdentifier>{6FD6C683-9D1E-5627-87D5-043B91BB2796}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\Particle">
+      <UniqueIdentifier>{5F6E2F23-CE68-55BD-9FD2-78F46616CABB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Shaders\Samples">
+      <UniqueIdentifier>{1CD0909B-49D7-5A3B-AB6B-029DF27DC1B2}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Application\main.cpp">
-      <Filter>ソース ファイル</Filter>
+      <Filter>Application</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Math\Matrix.cpp">
-      <Filter>ソース ファイル</Filter>
+      <Filter>Engine\Math</Filter>
     </ClCompile>
     <ClCompile Include="..\externals\imgui\imgui.cpp">
       <Filter>imgui</Filter>
@@ -46,40 +103,56 @@
       <Filter>imgui</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Platform\Input\Input.cpp">
-      <Filter>ソース ファイル</Filter>
+      <Filter>Engine\Platform\Input</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Graphics\Camera\DebugCamera.cpp">
-      <Filter>ソース ファイル</Filter>
+      <Filter>Engine\Graphics\Camera</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Renderer\Particle\ParticleManager.cpp">
-      <Filter>ソース ファイル</Filter>
+      <Filter>Engine\Renderer\Particle</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Platform\Windows\WinApp.cpp">
-      <Filter>ソース ファイル</Filter>
+      <Filter>Engine\Platform\Windows</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Graphics\DirectX\DirectXCommon.cpp">
-      <Filter>ソース ファイル</Filter>
+      <Filter>Engine\Graphics\DirectX</Filter>
     </ClCompile>
     <ClCompile Include="Editor\Particle\ParticleEditor.cpp">
-      <Filter>ソース ファイル</Filter>
+      <Filter>Editor\Particle</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />
-    <None Include="Shaders\Object3D\Object3d.hlsli" />
-    <None Include="Shaders\Particle\Particle.hlsli" />
+    <None Include="Shaders\Object3D\Object3d.hlsli">
+      <Filter>Shaders\Object3D</Filter>
+    </None>
+    <None Include="Shaders\Particle\Particle.hlsli">
+      <Filter>Shaders\Particle</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Shaders\Object3D\Object3d.VS.hlsl" />
-    <FxCompile Include="Shaders\Object3D\Object3d.PS.hlsl" />
-    <FxCompile Include="Shaders\Samples\Suzanne.VS.hlsl" />
-    <FxCompile Include="Shaders\Samples\Suzanne.PS.hlsl" />
-    <FxCompile Include="Shaders\Particle\Particle.VS.hlsl" />
-    <FxCompile Include="Shaders\Particle\Particle.PS.hlsl" />
+    <FxCompile Include="Shaders\Object3D\Object3d.VS.hlsl">
+      <Filter>Shaders\Object3D</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\Object3D\Object3d.PS.hlsl">
+      <Filter>Shaders\Object3D</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\Samples\Suzanne.VS.hlsl">
+      <Filter>Shaders\Samples</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\Samples\Suzanne.PS.hlsl">
+      <Filter>Shaders\Samples</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\Particle\Particle.VS.hlsl">
+      <Filter>Shaders\Particle</Filter>
+    </FxCompile>
+    <FxCompile Include="Shaders\Particle\Particle.PS.hlsl">
+      <Filter>Shaders\Particle</Filter>
+    </FxCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Engine\Math\Matrix.h">
-      <Filter>ヘッダー ファイル</Filter>
+      <Filter>Engine\Math</Filter>
     </ClInclude>
     <ClInclude Include="..\externals\imgui\imconfig.h">
       <Filter>imgui</Filter>
@@ -106,28 +179,28 @@
       <Filter>imgui</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Platform\Input\Input.h">
-      <Filter>ヘッダー ファイル</Filter>
+      <Filter>Engine\Platform\Input</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Graphics\Camera\DebugCamera.h">
-      <Filter>ヘッダー ファイル</Filter>
+      <Filter>Engine\Graphics\Camera</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Renderer\Particle\ParticleManager.h">
-      <Filter>ヘッダー ファイル</Filter>
+      <Filter>Engine\Renderer\Particle</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Renderer\Particle\ParticleData.h">
-      <Filter>ヘッダー ファイル</Filter>
+      <Filter>Engine\Renderer\Particle</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Platform\Windows\WinApp.h">
-      <Filter>ヘッダー ファイル</Filter>
+      <Filter>Engine\Platform\Windows</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Graphics\DirectX\DirectXCommon.h">
-      <Filter>ヘッダー ファイル</Filter>
+      <Filter>Engine\Graphics\DirectX</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Core\Time\FrameRateController.h">
-      <Filter>ヘッダー ファイル</Filter>
+      <Filter>Engine\Core\Time</Filter>
     </ClInclude>
     <ClInclude Include="Editor\Particle\ParticleEditor.h">
-      <Filter>ヘッダー ファイル</Filter>
+      <Filter>Editor\Particle</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

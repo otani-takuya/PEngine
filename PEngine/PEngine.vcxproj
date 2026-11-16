@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
@@ -68,6 +68,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <TreatWarningAsError>true</TreatWarningAsError>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Engine\Math;$(ProjectDir)Engine\Core\Time;$(ProjectDir)Engine\Platform\Windows;$(ProjectDir)Engine\Platform\Input;$(ProjectDir)Engine\Graphics\DirectX;$(ProjectDir)Engine\Graphics\Camera;$(ProjectDir)Engine\Renderer\Particle;$(ProjectDir)Editor\Particle;$(ProjectDir)externals\imgui;$(ProjectDir)externals\DirectXTex;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -95,6 +96,7 @@ copy "$(windowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxil.dll" "$(TargetDir)dx
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Engine\Math;$(ProjectDir)Engine\Core\Time;$(ProjectDir)Engine\Platform\Windows;$(ProjectDir)Engine\Platform\Input;$(ProjectDir)Engine\Graphics\DirectX;$(ProjectDir)Engine\Graphics\Camera;$(ProjectDir)Engine\Renderer\Particle;$(ProjectDir)Editor\Particle;$(ProjectDir)externals\imgui;$(ProjectDir)externals\DirectXTex;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -118,6 +120,7 @@ copy "$(windowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxil.dll" "$(TargetDir)dx
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <Optimization>Disabled</Optimization>
       <WholeProgramOptimization>false</WholeProgramOptimization>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Engine\Math;$(ProjectDir)Engine\Core\Time;$(ProjectDir)Engine\Platform\Windows;$(ProjectDir)Engine\Platform\Input;$(ProjectDir)Engine\Graphics\DirectX;$(ProjectDir)Engine\Graphics\Camera;$(ProjectDir)Engine\Renderer\Particle;$(ProjectDir)Editor\Particle;$(ProjectDir)externals\imgui;$(ProjectDir)externals\DirectXTex;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
