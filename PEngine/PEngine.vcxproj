@@ -157,53 +157,53 @@ copy "$(windowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxil.dll" "$(TargetDir)dx
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Development|x64'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="DebugCamera.cpp" />
-    <ClCompile Include="DirectXCommon.cpp" />
-    <ClCompile Include="Input.cpp" />
-    <ClCompile Include="main.cpp">
+    <ClCompile Include="Engine\Graphics\Camera\DebugCamera.cpp" />
+    <ClCompile Include="Engine\Graphics\DirectX\DirectXCommon.cpp" />
+    <ClCompile Include="Engine\Platform\Input\Input.cpp" />
+    <ClCompile Include="Application\main.cpp">
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Development|x64'">WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
-    <ClCompile Include="Matrix.cpp" />
-    <ClCompile Include="ParticleEditor.cpp" />
-    <ClCompile Include="ParticleManager.cpp" />
-    <ClCompile Include="WinApp.cpp" />
+    <ClCompile Include="Engine\Math\Matrix.cpp" />
+    <ClCompile Include="Editor\Particle\ParticleEditor.cpp" />
+    <ClCompile Include="Engine\Renderer\Particle\ParticleManager.cpp" />
+    <ClCompile Include="Engine\Platform\Windows\WinApp.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />
-    <None Include="Object3d.hlsli" />
-    <None Include="Particle.hlsli" />
+    <None Include="Shaders\Object3D\Object3d.hlsli" />
+    <None Include="Shaders\Particle\Particle.hlsli" />
   </ItemGroup>
   <ItemGroup>
-    <FxCompile Include="Object3d.PS.hlsl">
+    <FxCompile Include="Shaders\Object3D\Object3d.PS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Development|x64'">Pixel</ShaderType>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </ExcludedFromBuild>
     </FxCompile>
-    <FxCompile Include="Object3d.VS.hlsl">
+    <FxCompile Include="Shaders\Object3D\Object3d.VS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Vertex</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Development|x64'">Vertex</ShaderType>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
       </ExcludedFromBuild>
     </FxCompile>
-    <FxCompile Include="Particle.PS.hlsl">
+    <FxCompile Include="Shaders\Particle\Particle.PS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">6.0</ShaderModel>
     </FxCompile>
-    <FxCompile Include="Particle.VS.hlsl">
+    <FxCompile Include="Shaders\Particle\Particle.VS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Vertex</ShaderType>
       <ShaderModel Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">6.0</ShaderModel>
     </FxCompile>
-    <FxCompile Include="Suzanne.PS.hlsl">
+    <FxCompile Include="Shaders\Samples\Suzanne.PS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Pixel</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Development|x64'">Pixel</ShaderType>
     </FxCompile>
-    <FxCompile Include="Suzanne.VS.hlsl">
+    <FxCompile Include="Shaders\Samples\Suzanne.VS.hlsl">
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Vertex</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Vertex</ShaderType>
       <ShaderType Condition="'$(Configuration)|$(Platform)'=='Development|x64'">Vertex</ShaderType>
@@ -218,15 +218,15 @@ copy "$(windowsSdkDir)bin\$(TargetPlatformVersion)\x64\dxil.dll" "$(TargetDir)dx
     <ClInclude Include="..\externals\imgui\imstb_rectpack.h" />
     <ClInclude Include="..\externals\imgui\imstb_textedit.h" />
     <ClInclude Include="..\externals\imgui\imstb_truetype.h" />
-    <ClInclude Include="DebugCamera.h" />
-    <ClInclude Include="DirectXCommon.h" />
-    <ClInclude Include="FrameRateController.h" />
-    <ClInclude Include="Input.h" />
-    <ClInclude Include="Matrix.h" />
-    <ClInclude Include="ParticleData.h" />
-    <ClInclude Include="ParticleEditor.h" />
-    <ClInclude Include="ParticleManager.h" />
-    <ClInclude Include="WinApp.h" />
+    <ClInclude Include="Engine\Graphics\Camera\DebugCamera.h" />
+    <ClInclude Include="Engine\Graphics\DirectX\DirectXCommon.h" />
+    <ClInclude Include="Engine\Core\Time\FrameRateController.h" />
+    <ClInclude Include="Engine\Platform\Input\Input.h" />
+    <ClInclude Include="Engine\Math\Matrix.h" />
+    <ClInclude Include="Engine\Renderer\Particle\ParticleData.h" />
+    <ClInclude Include="Editor\Particle\ParticleEditor.h" />
+    <ClInclude Include="Engine\Renderer\Particle\ParticleManager.h" />
+    <ClInclude Include="Engine\Platform\Windows\WinApp.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\externals\imgui\LICENSE.txt" />
