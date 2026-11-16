@@ -1,0 +1,42 @@
+
+name: PEngine Build
+
+# GitHub Actionsの実行条件
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# ビルド環境
+env:
+  SOLUTION_FILE_PATH: PEngine/PEngine.slnx
+  BUILD_CONFIGURATION: Debug
+  BUILD_PLATFORM: x64
+
+jobs:
+  build:
+    name: Build PEngine (Debug x64)
+
+    # Windows環境で実行
+    runs-on: windows-2025
+
+    steps:
+      # リポジトリを取得
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # MSBuildを使用できるようにする
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
+
+      # MSBuildのバージョン確認
+      - name: Check MSBuild version
+        run: msbuild -version
+
+      # PEngineをビルド
+      - name: Build PEngine
+        shell: pwsh
+        run: |
+          msbuild "${{ env.SOLUTION_FILE_PATH }}" /m /p:Configuration=${{ env.BUILD_CONFIGURATION }} /p:Platform=${{ env.BUILD_PLATFORM }}
