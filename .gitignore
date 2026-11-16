@@ -367,3 +367,9 @@ imgui.ini
 
 [esternals/**]
 generated_code = true
+
+# ========================================
+# PEngine - Build Generated Files
+# ========================================
+
+/generated/
