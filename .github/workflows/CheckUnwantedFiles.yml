@@ -1,0 +1,73 @@
+
+# ==========================================
+# Git管理不要ファイルの自動検出
+# ==========================================
+
+name: CheckUnwantedFiles
+
+on:
+  # GitHub Actionsから手動実行
+  workflow_dispatch:
+
+  # masterブランチへのpush時に実行
+  push:
+    branches:
+      - master
+
+# ==========================================
+# 不要ファイルの検出パターン
+# ==========================================
+
+env:
+  # ファイル名・拡張子
+  UNWANTED_NAME_PATTERNS: "*.pdb *.ilk *.user *.ncb *.suo *.log *.dmp *.zip imgui.ini desktop.ini exclusion.dic .DS_Store"
+
+  # ビルド生成物・IDE関連フォルダ
+  UNWANTED_DIR_PATTERNS: "generated x64 win32 arm64 .vs bin ipch logs Dumps"
+
+# ==========================================
+# ジョブ
+# ==========================================
+
+jobs:
+  check-files:
+    name: 不要なファイルを検索
+
+    runs-on: ubuntu-latest
+
+    steps:
+      # リポジトリを取得
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      # 不要ファイルを検索
+      - name: 不要なファイルとディレクトリを検索
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DIR_CONDITIONS=()
+          for pattern in $UNWANTED_DIR_PATTERNS; do
+            DIR_CONDITIONS+=( -o -iname "$pattern" )
+          done
+          unset 'DIR_CONDITIONS[0]'
+
+          NAME_CONDITIONS=()
+          for pattern in $UNWANTED_NAME_PATTERNS; do
+            NAME_CONDITIONS+=( -o -iname "$pattern" )
+          done
+          unset 'NAME_CONDITIONS[0]'
+
+          UNWANTED_LIST=$(
+            find . -path './.git' -prune -o \
+              \( -type d \( "${DIR_CONDITIONS[@]}" \) -prune -print \) -o \
+              \( \( "${NAME_CONDITIONS[@]}" \) -a -type f -print \)
+          )
+
+          if [ -n "$UNWANTED_LIST" ]; then
+            echo "不要なファイルまたはディレクトリが見つかりました！"
+            echo "$UNWANTED_LIST"
+            exit 1
+          fi
+
+          echo "リポジトリはクリーンです。"
